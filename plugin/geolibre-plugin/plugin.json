@@ -1,0 +1,9 @@
+{
+  "id": "smart15-orquestrador",
+  "name": "Smart-15: Acessibilidade",
+  "version": "1.0.5",
+  "description": "Orquestrador de Simulação Urbana",
+  "author": "Leandro da Silva Gregorio",
+  "entry": "dist/index.js",
+  "activeByDefault": true
+}
