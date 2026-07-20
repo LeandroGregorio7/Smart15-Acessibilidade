@@ -17,6 +17,7 @@ from rasterio.env import Env
 from rasterio.features import rasterize
 from shapely.geometry import Point, Polygon, box, MultiPolygon
 from app.settings import ALLOW_ORIGINS
+from uuid import UUID, uuid4
 import h3
 import os
 import zipfile
@@ -36,9 +37,8 @@ import rioxarray
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-TEMP_DIR = BASE_DIR / "temp_export"
-
-TEMP_DIR.mkdir(exist_ok=True)
+TEMP_ROOT = BASE_DIR / "temp_export"
+TEMP_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -63,8 +63,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-os.makedirs(TEMP_DIR, exist_ok=True)
-app.mount("/temp", StaticFiles(directory=TEMP_DIR), name="temp")
+app.mount(
+    "/temp",
+    StaticFiles(directory=str(TEMP_ROOT)),
+    name="temp",
+)
+
+def create_simulation_directory() -> tuple[str, Path]:
+    simulation_id = str(uuid4())
+    simulation_dir = TEMP_ROOT / simulation_id
+    simulation_dir.mkdir(parents=True, exist_ok=False)
+
+    return simulation_id, simulation_dir
+
+
+def get_simulation_directory(simulation_id: str) -> Path:
+    """
+    Valida o UUID recebido e devolve o diretório correspondente.
+
+    A validação impede caminhos como ../../etc ou outros valores arbitrários.
+    """
+    try:
+        normalized_id = str(UUID(simulation_id))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="simulation_id inválido.",
+        ) from exc
+
+    simulation_dir = TEMP_ROOT / normalized_id
+
+    if not simulation_dir.is_dir():
+        raise HTTPException(
+            status_code=404,
+            detail="Simulação não encontrada.",
+        )
+
+    return simulation_dir
 
 try:
     from sklearn.tree import DecisionTreeClassifier
@@ -190,7 +225,14 @@ def baixar_raster_nuvem_stac(bbox, poly, colecao, out_path, tipo_asset):
         logger.error(f"NUVEM: Falha ao extrair {tipo_asset}: {e}")
         return False
 
-def tiff_to_png(tif_path, colormap, out_name, is_rgb=False):
+def tiff_to_png(
+    tif_path: Path,
+    colormap,
+    out_name: str,
+    output_dir: Path,
+    simulation_id: str,
+    is_rgb: bool = False,
+):
     try:
         with rasterio.open(tif_path) as src:
             scale = min(1024 / src.width, 1024 / src.height)
@@ -203,24 +245,65 @@ def tiff_to_png(tif_path, colormap, out_name, is_rgb=False):
             else: left, bottom, right, top = bounds.left, bounds.bottom, bounds.right, bounds.top
 
             vmin, vmax = 0, 1
+            output_path = output_dir / f"{out_name}.png"
             if is_rgb and src.count >= 3:
                 img_data = np.transpose(data[:3, :, :], (1, 2, 0)).astype(np.float32)
-                p2, p98 = np.nanpercentile(img_data[img_data > 0], [2, 98])
+                valid_pixels = img_data[img_data > 0]
+                if valid_pixels.size:
+                    p2, p98 = np.nanpercentile(valid_pixels, [2, 98])
+
+                    if p98 > p2:
+                        img_data = np.clip(img_data, p2, p98)
+                        img_data = (img_data - p2) / (p98 - p2)
                 if p98 > p2:
                     img_data = np.clip(img_data, p2, p98)
                     img_data = (img_data - p2) / (p98 - p2)
-                plt.imsave(f"temp_export/{out_name}.png", img_data, format='png')
+                output_path = output_dir / f"{out_name}.png"
+                plt.imsave(
+                    output_path,
+                    img_data,
+                    format="png",
+                )
             else:
                 nodata_val = src.nodata
                 img_data = np.ma.masked_equal(data[0], nodata_val) if nodata_val is not None else np.ma.masked_less(data[0], -999)
                 valid_data = img_data.compressed() if np.ma.isMaskedArray(img_data) else img_data[np.isfinite(img_data)]
                 if len(valid_data) > 0: vmin, vmax = np.nanpercentile(valid_data, [2, 98])
-                plt.imsave(f"temp_export/{out_name}.png", img_data, cmap=colormap, format='png', vmin=vmin, vmax=vmax)
+                output_path = output_dir / f"{out_name}.png"
+                plt.imsave(
+                    output_path,
+                    img_data,
+                    cmap=colormap,
+                    format="png",
+                    vmin=vmin,
+                    vmax=vmax,
+                )
             
-            return {"url": f"/temp/{out_name}.png", "coordinates": [[left, top], [right, top], [right, bottom], [left, bottom]], "min": float(vmin), "max": float(vmax)}
-    except Exception as e: return None
+            return {
+                "url": f"/temp/{simulation_id}/{out_name}.png",
+                "coordinates": [
+                    [left, top],
+                    [right, top],
+                    [right, bottom],
+                    [left, bottom],
+                ],
+                "min": float(vmin),
+                "max": float(vmax),
+            }
+    except Exception as exc:
+        logger.exception("Erro em tiff_to_png (%s): %s", out_name, exc)
+        return None
 
-def matrix_to_png(matrix, bounds, crs, colormap, out_name, is_categorical=False):
+def matrix_to_png(
+    matrix,
+    bounds,
+    crs,
+    colormap,
+    out_name: str,
+    output_dir: Path,
+    simulation_id: str,
+    is_categorical: bool = False,
+):
     try:
         img_data = np.ma.masked_invalid(matrix.astype(float))
         if is_categorical:
@@ -231,10 +314,18 @@ def matrix_to_png(matrix, bounds, crs, colormap, out_name, is_categorical=False)
             else: vmin, vmax = 0, 1
             if vmin >= vmax: vmax = vmin + 0.1
         
-        plt.imsave(f"temp_export/{out_name}.png", img_data, cmap=colormap, format='png', vmin=vmin, vmax=vmax)
+        output_path = output_dir / f"{out_name}.png"
+        plt.imsave(
+            output_path,
+            img_data,
+            cmap=colormap,
+            format="png",
+            vmin=vmin,
+            vmax=vmax,
+        )
         if crs and crs.to_string() != 'EPSG:4326': left, bottom, right, top = transform_bounds(crs, 'EPSG:4326', bounds.left, bounds.bottom, bounds.right, bounds.top)
         else: left, bottom, right, top = bounds.left, bounds.bottom, bounds.right, bounds.top
-        return {"url": f"/temp/{out_name}.png", "coordinates": [[left, top], [right, top], [right, bottom], [left, bottom]], "min": float(vmin), "max": float(vmax)}
+        return {"url": f"/temp/{simulation_id}/{out_name}.png","coordinates": [[left, top], [right, top], [right, bottom], [left, bottom]], "min": float(vmin), "max": float(vmax)}
     except Exception as e:
         logger.error(f"Erro em matrix_to_png ({out_name}): {e}")
         return None
@@ -258,21 +349,32 @@ def create_hex_grid(poly, res=10):
 
 @app.post("/simular")
 async def simular_urbana(
-    dados: str = Form(...), file_veg: UploadFile = File(None), file_temp: UploadFile = File(None),
-    file_dem: UploadFile = File(None), file_limite: UploadFile = File(None), file_samples: UploadFile = File(None)
+    dados: str = Form(...),
+    file_veg: UploadFile = File(None),
+    file_temp: UploadFile = File(None),
+    file_dem: UploadFile = File(None),
+    file_limite: UploadFile = File(None),
+    file_samples: UploadFile = File(None),
 ):
+    simulation_id = None
+    simulation_dir = None
+
     try:
+        simulation_id, simulation_dir = create_simulation_directory()
+
+        dem_path = simulation_dir / "dem.tif"
+        veg_path = simulation_dir / "veg.tif"
+        lst_path = simulation_dir / "lst.tif"
+        samples_path = simulation_dir / "samples.geojson"
+
         pacote = json.loads(dados)
-        bbox = pacote.get('bbox')
+        bbox = pacote.get("bbox")
         perfis, alvos = pacote.get('perfis', []), pacote.get('alvos', [])
         formatos_saida, vis_formatos = pacote.get('formatos_export', ['shp', 'geojson']), pacote.get('formatos', ['hexagonos', 'isocronas'])
         modo_temp = pacote.get('modo_temp', 'manual')
         
-        logger.info(f"--- Iniciando Nova Simulação Urbana ---")
+        logger.info("--- Iniciando Nova Simulação Urbana [%s] ---",simulation_id)
         
-        for f in os.listdir("temp_export"):
-            if any(f.endswith(ext) for ext in ['.png', '.shp', '.geojson', '.kml', '.zip', '.shx', '.dbf', '.prj', '.tif']): os.remove(os.path.join("temp_export", f))
-
         if file_limite:
             gdf_limite = gpd.read_file(file_limite.file)
             gdf_limite.to_crs("EPSG:4326", inplace=True)
@@ -287,23 +389,23 @@ async def simular_urbana(
         import time; t_stamp = str(int(time.time()))
         
         if file_dem:
-            with open(TEMP_DIR / "dem.tif", "wb") as f: f.write(file_dem.file.read())
-        else: baixar_raster_nuvem_stac(bbox_expanded, poly_expanded, "cop-dem-glo-30", TEMP_DIR / "dem.tif", "dem")
+            dem_path.write_bytes(await file_dem.read())
+        else: baixar_raster_nuvem_stac(bbox_expanded, poly_expanded, "cop-dem-glo-30", dem_path, "dem")
             
         if file_veg:
-            with open(TEMP_DIR / "veg.tif", "wb") as f: f.write(file_veg.file.read())
-        else: baixar_raster_nuvem_stac(bbox_expanded, poly_expanded, "sentinel-2-l2a", TEMP_DIR / "veg.tif", "veg")
+            veg_path.write_bytes(await file_veg.read())
+        else: baixar_raster_nuvem_stac(bbox_expanded, poly_expanded, "sentinel-2-l2a", veg_path, "veg")
 
         if file_temp:
-            with open(TEMP_DIR / "lst.tif", "wb") as f: f.write(file_temp.file.read())
+            lst_path.write_bytes(await file_temp.read())
         elif modo_temp == 'auto_pc':
-            download_lst_pc(bbox_expanded, TEMP_DIR / "lst.tif")
+            download_lst_pc(bbox_expanded, simulation_dir / "lst.tif")
 
         # ==========================================
         # 1. LST
-        if os.path.exists(TEMP_DIR / "lst.tif"):
+        if os.path.exists(simulation_dir / "lst.tif"):
             try:
-                with rasterio.open(TEMP_DIR / "lst.tif") as src:
+                with rasterio.open(simulation_dir / "lst.tif") as src:
                     sc = min(1024 / src.width, 1024 / src.height)
                     if sc > 1: sc = 1.0
                     lst_data = src.read(1, out_shape=(int(src.height * sc), int(src.width * sc)), resampling=Resampling.cubic).astype(float)
@@ -311,20 +413,33 @@ async def simular_urbana(
                     lst_data[lst_data < -999] = np.nan; lst_data[lst_data == 0] = np.nan 
 
                     if np.nanmax(lst_data) > 1000: lst_data = (lst_data * 0.00341802) + 149.0 - 273.15
-                    r_vis = matrix_to_png(lst_data, src.bounds, src.crs, 'hot', f'lst_{t_stamp}')
+                    r_vis = matrix_to_png(
+                        lst_data,
+                        src.bounds,
+                        src.crs,
+                        "hot",
+                        "lst",
+                        simulation_dir,
+                        simulation_id,
+                    )
                     if r_vis: 
                         r_vis['cmap_css'] = 'linear-gradient(to right, #0b0000, #d30000, #ff5b00, #fffa00, #ffffff)'
                         rasters_vis['LST (Calor)'] = r_vis
             except Exception as e: logger.error(f"Erro LST: {e}")
-
         # 2. DEM e DECLIVIDADE
-        if os.path.exists(TEMP_DIR / "dem.tif"):
-            r_vis = tiff_to_png(TEMP_DIR / "dem.tif", 'nipy_spectral', f'dem_{t_stamp}')
+        if os.path.exists(simulation_dir / "dem.tif"):
+            r_vis = tiff_to_png(
+                dem_path,
+                "nipy_spectral",
+                f"dem_{t_stamp}",
+                simulation_dir,
+                simulation_id,
+            )
             if r_vis: 
                 r_vis['cmap_css'] = 'linear-gradient(to right, #000000, #a000a0, #0000ff, #00a000, #00ff00, #ffff00, #ff0000, #e0e0e0, #ffffff)'
                 rasters_vis['DEM (Relevo)'] = r_vis
             try:
-                with rasterio.open(TEMP_DIR / "dem.tif") as src:
+                with rasterio.open(simulation_dir / "dem.tif") as src:
                     sc = min(1024 / src.width, 1024 / src.height)
                     if sc > 1: sc = 1.0
                     dem_data = src.read(1, out_shape=(int(src.height * sc), int(src.width * sc)), resampling=Resampling.cubic).astype(float)
@@ -339,7 +454,15 @@ async def simular_urbana(
                     slope_matrix = np.sqrt(dx**2 + dy**2) 
                     slope_matrix[np.isnan(dem_data)] = np.nan 
                     
-                    sm_vis = matrix_to_png(np.clip(slope_matrix, 0, 0.5) * 100, src.bounds, src.crs, 'plasma', f'slope_{t_stamp}')
+                    sm_vis = matrix_to_png(
+                        np.clip(slope_matrix, 0, 0.5) * 100,
+                        src.bounds,
+                        src.crs,
+                        "plasma",
+                        f"slope_{t_stamp}",
+                        simulation_dir,
+                        simulation_id,
+                    )
                     if sm_vis: 
                         sm_vis['cmap_css'] = 'linear-gradient(to right, #0d0887, #7e03a8, #cc4678, #f89441, #f0f921)'
                         rasters_vis['Declividade (%)'] = sm_vis
@@ -348,11 +471,18 @@ async def simular_urbana(
         rf_model = None; tree_classes = []
 
         # 3. NGRDI E IA (COM RECONHECIMENTO DA CLASSE 4)
-        if os.path.exists(TEMP_DIR / "veg.tif"):
-            r_vis = tiff_to_png(TEMP_DIR / "veg.tif", 'YlGn', f'veg_{t_stamp}', is_rgb=True)
+        if os.path.exists(simulation_dir / "veg.tif"):
+            r_vis = tiff_to_png(
+                veg_path,
+                "YlGn",
+                f"veg_{t_stamp}",
+                simulation_dir,
+                simulation_id,
+                is_rgb=True,
+            )
             if r_vis: rasters_vis['Ortofoto'] = r_vis
             try:
-                with rasterio.open(TEMP_DIR / "veg.tif") as src:
+                with rasterio.open(simulation_dir / "veg.tif") as src:
                     sc = min(1024 / src.width, 1024 / src.height)
                     if sc > 1: sc = 1.0
                     
@@ -365,7 +495,15 @@ async def simular_urbana(
                     bg_mask = (veg_float[0] == 0) & (veg_float[1] == 0) & (veg_float[2] == 0)
                     idx_matrix[bg_mask] = np.nan
                     
-                    idx_vis = matrix_to_png(idx_matrix, src.bounds, src.crs, 'RdYlGn', f'index_{t_stamp}')
+                    idx_vis = matrix_to_png(
+                        idx_matrix,
+                        src.bounds,
+                        src.crs,
+                        "RdYlGn",
+                        f"index_{t_stamp}",
+                        simulation_dir,
+                        simulation_id,
+                    )
                     if idx_vis: 
                         idx_vis['cmap_css'] = 'linear-gradient(to right, #a50026, #f46d43, #fee08b, #d9ef8b, #66bd63, #006837)'
                         rasters_vis['Índice NGRDI'] = idx_vis
@@ -374,10 +512,10 @@ async def simular_urbana(
             if file_samples and SKLEARN_AVAILABLE:
                 try:
                     logger.info("IA: Iniciando treinamento do modelo OBIA Avançado...")
-                    with open(TEMP_DIR / "samples.geojson", "wb") as f: f.write(file_samples.file.read())
-                    samples_gdf = gpd.read_file(TEMP_DIR / "samples.geojson")
+                    samples_path.write_bytes(await file_samples.read())
+                    samples_gdf = gpd.read_file(samples_path)
 
-                    with rasterio.open(TEMP_DIR / "veg.tif") as veg_src:
+                    with rasterio.open(simulation_dir / "veg.tif") as veg_src:
                         samples_gdf = samples_gdf.to_crs(veg_src.crs)
                         
                         col_name = next((c for c in samples_gdf.columns if c.lower() in ['class', 'classe', 'id', 'nome', 'tipo', 'label']), None)
@@ -404,7 +542,11 @@ async def simular_urbana(
                                         shapes.append((geom, class_to_id[c_str]))
 
                             if shapes:
-                                out_transform = rasterio.transform.from_bounds(*src.bounds, out_w, out_h)
+                                out_transform = rasterio.transform.from_bounds(
+                                    *veg_src.bounds,
+                                    out_w,
+                                    out_h,
+                                )
                                 mask_arr = rasterize(shapes, out_shape=(out_h, out_w), transform=out_transform, fill=0, dtype='int16')
 
                                 train_mask = mask_arr > 0
@@ -430,7 +572,16 @@ async def simular_urbana(
                                         ia_colors = [get_color_for_class(c) for c in unique_classes]
                                         cmap_custom = ListedColormap(ia_colors)
 
-                                        cl_vis = matrix_to_png(num_preds, src.bounds, src.crs, cmap_custom, f'class_{t_stamp}', is_categorical=True)
+                                        cl_vis = matrix_to_png(
+                                            num_preds,
+                                            veg_src.bounds,
+                                            veg_src.crs,
+                                            cmap_custom,
+                                            f"class_{t_stamp}",
+                                            simulation_dir,
+                                            simulation_id,
+                                            is_categorical=True,
+                                        )
                                         if cl_vis:
                                             cl_vis['legend'] = {c: get_color_for_class(c) for c in unique_classes}
                                             rasters_vis['Classificação IA (OBIA)'] = cl_vis
@@ -446,9 +597,9 @@ async def simular_urbana(
 
         center_node = ox.distance.nearest_nodes(G, X=poly.centroid.x, Y=poly.centroid.y)
         
-        dem_src = rasterio.open(TEMP_DIR / "dem.tif") if os.path.exists(TEMP_DIR / "dem.tif") else None
-        lst_src = rasterio.open(TEMP_DIR / "lst.tif") if os.path.exists(TEMP_DIR / "lst.tif") else None
-        veg_src = rasterio.open(TEMP_DIR / "veg.tif") if os.path.exists(TEMP_DIR / "veg.tif") else None
+        dem_src = rasterio.open(simulation_dir / "dem.tif") if os.path.exists(simulation_dir / "dem.tif") else None
+        lst_src = rasterio.open(simulation_dir / "lst.tif") if os.path.exists(simulation_dir / "lst.tif") else None
+        veg_src = rasterio.open(simulation_dir / "veg.tif") if os.path.exists(simulation_dir / "veg.tif") else None
 
         trans_dem = Transformer.from_crs(G_proj.graph['crs'], dem_src.crs, always_xy=True) if dem_src else None
         trans_lst = Transformer.from_crs(G_proj.graph['crs'], lst_src.crs, always_xy=True) if lst_src else None
@@ -561,12 +712,33 @@ async def simular_urbana(
 
             gdf_iso = gpd.GeoDataFrame(features_iso, crs="EPSG:4326")
             
-            def export_gdf(gdf, base_name):
-                if 'shp' in formatos_saida: gdf.to_file(f"temp_export/{base_name}.shp", driver='ESRI Shapefile')
-                if 'geojson' in formatos_saida: gdf.to_file(f"temp_export/{base_name}.geojson", driver='GeoJSON')
-                if 'kml' in formatos_saida:
-                    try: gpd.io.file.fiona.drvsupport.supported_drivers['KML'] = 'rw'; gdf.to_file(f"temp_export/{base_name}.kml", driver='KML')
-                    except: pass
+            def export_gdf(gdf, base_name: str):
+                if "shp" in formatos_saida:
+                    gdf.to_file(
+                        simulation_dir / f"{base_name}.shp",
+                        driver="ESRI Shapefile",
+                    )
+
+                if "geojson" in formatos_saida:
+                    gdf.to_file(
+                        simulation_dir / f"{base_name}.geojson",
+                        driver="GeoJSON",
+                    )
+
+                if "kml" in formatos_saida:
+                    try:
+                        gpd.io.file.fiona.drvsupport.supported_drivers["KML"] = "rw"
+
+                        gdf.to_file(
+                            simulation_dir / f"{base_name}.kml",
+                            driver="KML",
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Não foi possível exportar %s em KML: %s",
+                            base_name,
+                            exc,
+                        )
             
             if 'isocronas' in vis_formatos and not gdf_iso.empty:
                 simulacoes_geojsons.append(gdf_iso.to_json()); export_gdf(gdf_iso, f"isocronas_{perfil}")
@@ -587,26 +759,71 @@ async def simular_urbana(
             geojson_osm = gdf_pois_clean.to_json(); export_gdf(gdf_pois_clean, "equipamentos_osm")
         else: geojson_osm = "{}"
 
-        with zipfile.ZipFile("exportacao_smart15.zip", 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for root, dirs, files in os.walk("temp_export"):
-                for file in files: zipf.write(os.path.join(root, file), file)
+        zip_path = simulation_dir / "Resultados_Smart15.zip"
 
-        logger.info("Simulação concluída com sucesso.")
+        with zipfile.ZipFile(
+            zip_path,
+            "w",
+            zipfile.ZIP_DEFLATED,
+        ) as zipf:
+            for file_path in simulation_dir.rglob("*"):
+                if not file_path.is_file():
+                    continue
+
+                if file_path == zip_path:
+                    continue
+
+                zipf.write(
+                    file_path,
+                    arcname=file_path.relative_to(simulation_dir),
+                )
+
+        logger.info(
+            "Simulação [%s] concluída com sucesso.",
+            simulation_id,
+        )
+
         return {
-            "status": "sucesso", 
+            "status": "sucesso",
             "data": {
-                "simulacoes": simulacoes_geojsons, "osm_targets": geojson_osm, "bbox_rasters": bbox,
-                "rasters_vis": rasters_vis, "mask_geojson": json.dumps(mask_geojson),
-                "download_url": "/download_zip"
-            }
+                "simulation_id": simulation_id,
+                "simulacoes": simulacoes_geojsons,
+                "osm_targets": geojson_osm,
+                "bbox_rasters": bbox,
+                "rasters_vis": rasters_vis,
+                "mask_geojson": json.dumps(mask_geojson),
+                "download_url": f"/download_zip/{simulation_id}",
+            },
         }
-    except Exception as e:
-        logger.error(f"Erro fatal: {e}"); logger.error(traceback.format_exc())
-        return {"status": "erro", "mensagem": str(e)}
+    except Exception as exc:
+        logger.error(
+            "Erro fatal na simulação [%s]: %s",
+            simulation_id or "não criada",
+            exc,
+        )
+        logger.error(traceback.format_exc())
 
-@app.get("/download_zip")
-async def download_zip(): return FileResponse("exportacao_smart15.zip", media_type="application/zip", filename="Resultados_Smart15.zip", headers={"Content-Disposition": "attachment; filename=Resultados_Smart15.zip"})
+        return {
+            "status": "erro",
+            "simulation_id": simulation_id,
+            "mensagem": str(exc),
+        }
+@app.get("/download_zip/{simulation_id}")
+async def download_zip(simulation_id: str):
+    simulation_dir = get_simulation_directory(simulation_id)
+    zip_path = simulation_dir / "Resultados_Smart15.zip"
 
+    if not zip_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="Arquivo da simulação não encontrado.",
+        )
+
+    return FileResponse(
+        path=zip_path,
+        media_type="application/zip",
+        filename=f"Resultados_Smart15_{simulation_id[:8]}.zip",
+    )
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

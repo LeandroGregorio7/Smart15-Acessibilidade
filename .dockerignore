@@ -1,0 +1,16 @@
+.git
+.gitignore
+
+**/node_modules
+**/.vite
+**/dist
+**/coverage
+
+backend/temp_export
+backend/__pycache__
+**/*.pyc
+
+geolibre/target
+geolibre/apps/geolibre-desktop/src-tauri/target
+
+Resultados_Smart15.zip

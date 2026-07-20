@@ -80,6 +80,17 @@ cmp --silent "$BUNDLE_SOURCE" "$BUNDLE_DESTINATION" \
   || fail "O bundle copiado difere do arquivo de origem."
 
 log "Plugin sincronizado com sucesso:"
+
+echo
+echo "====================================================="
+echo "Plugin sincronizado."
+echo
+echo "Se o GeoLibre bloquear o plugin atualizado:"
+echo
+echo "localStorage.removeItem('geolibre.pluginBundlePins')"
+echo
+echo "e recarregue a página."
+echo "====================================================="
 find "$DESTINATION_DIR" \
   -maxdepth 3 \
   -type f \

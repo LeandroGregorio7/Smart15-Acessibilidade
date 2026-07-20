@@ -575,7 +575,7 @@ var plugin = {
 								geometria: geometriaGeoJSON,
 								samples: listaDeAmostras
 							};
-							const res = await (await fetch("http://127.0.0.1:8000/simular", {
+							const res = await (await fetch("/api/simular", {
 								method: "POST",
 								headers: { "Content-Type": "application/json" },
 								body: JSON.stringify(pacoteDeDados)
