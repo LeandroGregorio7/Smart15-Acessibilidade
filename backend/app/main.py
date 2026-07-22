@@ -29,7 +29,14 @@ import logging
 import traceback
 import requests
 import hashlib
-
+from shapely.geometry import (
+    Point,
+    Polygon,
+    box,
+    MultiPolygon,
+    shape,
+    mapping,
+)
 import pystac_client
 import planetary_computer
 import stackstac
@@ -75,6 +82,75 @@ def create_simulation_directory() -> tuple[str, Path]:
     simulation_dir.mkdir(parents=True, exist_ok=False)
 
     return simulation_id, simulation_dir
+
+def calculate_numeric_stats(values):
+    array = np.asarray(values, dtype=float)
+    valid = array[np.isfinite(array)]
+
+    if valid.size == 0:
+        return None
+
+    return {
+        "min": float(np.min(valid)),
+        "max": float(np.max(valid)),
+        "media": float(np.mean(valid)),
+        "mediana": float(np.median(valid)),
+        "desvio_padrao": float(np.std(valid)),
+        "p10": float(np.percentile(valid, 10)),
+        "p90": float(np.percentile(valid, 90)),
+        "quantidade_amostras": int(valid.size),
+    }
+
+
+def calculate_area_metrics(geometry):
+    area_gdf = gpd.GeoDataFrame(
+        geometry=[geometry],
+        crs="EPSG:4326",
+    )
+
+    metric_crs = area_gdf.estimate_utm_crs()
+
+    if metric_crs is None:
+        metric_crs = "EPSG:3857"
+
+    metric_geometry = area_gdf.to_crs(metric_crs).geometry.iloc[0]
+
+    return {
+        "crs_metrico": str(metric_crs),
+        "area_m2": float(metric_geometry.area),
+        "area_hectares": float(metric_geometry.area / 10_000),
+        "perimetro_m": float(metric_geometry.length),
+    }
+
+
+def get_raster_visual_stats(
+    rasters_vis: dict,
+    layer_name: str,
+) -> dict | None:
+    layer = rasters_vis.get(layer_name)
+
+    if not layer:
+        return None
+
+    minimum = layer.get("min")
+    maximum = layer.get("max")
+
+    result = {
+        "minimo": float(minimum)
+        if minimum is not None
+        else None,
+        "maximo": float(maximum)
+        if maximum is not None
+        else None,
+    }
+
+    if minimum is not None and maximum is not None:
+        result["amplitude"] = float(maximum - minimum)
+        result["media_aproximada"] = float(
+            (minimum + maximum) / 2
+        )
+
+    return result
 
 
 def get_simulation_directory(simulation_id: str) -> Path:
@@ -375,17 +451,108 @@ async def simular_urbana(
         
         logger.info("--- Iniciando Nova Simulação Urbana [%s] ---",simulation_id)
         
+        geometria_enviada = pacote.get("geometria")
+
         if file_limite:
             gdf_limite = gpd.read_file(file_limite.file)
-            gdf_limite.to_crs("EPSG:4326", inplace=True)
-            poly = gdf_limite.geometry.unary_union.buffer(0)
-        else: poly = box(bbox[0], bbox[1], bbox[2], bbox[3]).buffer(0)
+            gdf_limite = gdf_limite.to_crs("EPSG:4326")
+            poly = gdf_limite.geometry.union_all().buffer(0)
+
+        elif geometria_enviada:
+            try:
+                geometry_object = geometria_enviada
+
+                if geometry_object.get("type") == "FeatureCollection":
+                    geometrias = [
+                        shape(feature["geometry"])
+                        for feature in geometry_object.get("features", [])
+                        if feature.get("geometry")
+                    ]
+
+                    if not geometrias:
+                        raise ValueError("FeatureCollection sem geometrias válidas.")
+
+                    poly = gpd.GeoSeries(
+                        geometrias,
+                        crs="EPSG:4326",
+                    ).union_all().buffer(0)
+
+                elif geometry_object.get("type") == "Feature":
+                    poly = shape(geometry_object["geometry"]).buffer(0)
+
+                else:
+                    poly = shape(geometry_object).buffer(0)
+
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Geometria da área de estudo inválida: {exc}",
+                ) from exc
+
+        elif bbox and len(bbox) == 4:
+            poly = box(
+                bbox[0],
+                bbox[1],
+                bbox[2],
+                bbox[3],
+            ).buffer(0)
+
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Área de estudo não informada.",
+            )
+
+        if poly.is_empty:
+            raise HTTPException(
+                status_code=400,
+                detail="A geometria da área de estudo está vazia.",
+            )
+
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+
+        bbox = list(poly.bounds)
+
+        area_metrics = calculate_area_metrics(poly)
+
+        report_stats_area = {
+            **area_metrics,
+            "centroide": {
+                "longitude": float(poly.centroid.x),
+                "latitude": float(poly.centroid.y),
+            },
+            "bbox": [float(value) for value in poly.bounds],
+        }
 
         poly_expanded = poly.buffer(0.01)
         bbox_expanded = poly_expanded.bounds
 
         mask_geojson = gpd.GeoSeries([box(-180, -85, 180, 85).difference(poly)]).__geo_interface__
         rasters_vis = {}
+        report_stats = {
+            "area": report_stats_area,
+            "rasters": {
+                "elevacao": None,
+                "declividade": None,
+                "temperatura": None,
+                "vegetacao": None,
+            },
+            "pois": {
+                "total": 0,
+                "por_categoria": {},
+            },
+            "perfis": [],
+            "parametros": {
+                "perfis_selecionados": perfis,
+                "destinos_selecionados": alvos,
+                "formatos_processados": vis_formatos,
+                "modo_temperatura": pacote.get("modo_temp"),
+                "modo_vegetacao": pacote.get("modo_veg"),
+                "modo_relevo": pacote.get("modo_dem"),
+            },
+        }
+
         import time; t_stamp = str(int(time.time()))
         
         if file_dem:
@@ -662,6 +829,16 @@ async def simular_urbana(
         time_bands = [2, 5, 10, 15]
         
         for perfil in perfis:
+            perfil_report = {
+                "codigo": perfil,
+                "nome": None,
+                "velocidade_base_kmh": None,
+                "quantidade_isocronas": 0,
+                "quantidade_hexagonos": 0,
+                "tempos_isocronas": [],
+                "tempos_hexagonos": [],
+            }
+
             speed_kmh, slope_mult, lst_limit, lst_scale = 4.5, 3.5, 25.0, 10.0
             if "bike" in perfil or "ciclista" in perfil: speed_kmh = 11.0 if "crianca" in perfil else 10.0 if "idoso" in perfil else 15.0; slope_mult = 4.0 
             else: speed_kmh = 3.5 if "crianca" in perfil else 3.0 if "idoso" in perfil else 4.5
@@ -783,6 +960,35 @@ async def simular_urbana(
             simulation_id,
         )
 
+        report_stats["rasters"]["temperatura"] = (
+            get_raster_visual_stats(
+                rasters_vis,
+                "LST (Calor)",
+            )
+        )
+
+        report_stats["rasters"]["elevacao"] = (
+            get_raster_visual_stats(
+                rasters_vis,
+                "DEM (Relevo)",
+            )
+        )
+
+        report_stats["rasters"]["declividade"] = (
+            get_raster_visual_stats(
+                rasters_vis,
+                "Declividade (%)",
+            )
+        )
+
+        report_stats["rasters"]["vegetacao"] = (
+            get_raster_visual_stats(
+                rasters_vis,
+                "Índice NGRDI",
+            )
+        )
+
+
         return {
             "status": "sucesso",
             "data": {
@@ -793,6 +999,7 @@ async def simular_urbana(
                 "rasters_vis": rasters_vis,
                 "mask_geojson": json.dumps(mask_geojson),
                 "download_url": f"/download_zip/{simulation_id}",
+                "report": report_stats,
             },
         }
     except Exception as exc:

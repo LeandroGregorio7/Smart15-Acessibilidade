@@ -1,4 +1,7 @@
 //#region src/geolibre.ts
+import { openPrintableReport } from "./report/report.generator";
+import { adaptSimulationToReport } from "./report/report.adapter";
+import { captureMapAsDataUrl } from "./report/map.capture";
 const painelHtml = `
   <style>
     #smart15-main-wrapper { transition: all 0.3s ease; height: 100vh; overflow-y: auto; padding: 20px; font-family: Arial, sans-serif; box-sizing: border-box; }
@@ -384,6 +387,35 @@ const painelHtml = `
         <strong style="color:inherit;"><svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-download"/></svg> FAZER DOWNLOAD DO .ZIP</strong>
       </button>
 
+      <button
+        id="btnGenerateReport"
+        class="smart15-btn-export"
+        style="
+          display: none;
+          background: #fffaf0;
+          border-color: #d69e2e;
+          color: #975a16;
+        "
+      >
+        <strong
+          style="
+            color: inherit;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          "
+        >
+          <svg
+            viewBox="0 0 24 24"
+            class="s15-icon s15-icon-btn"
+          >
+            <use href="#icon-book"/>
+          </svg>
+
+          GERAR RELATÓRIO TÉCNICO
+        </strong>
+      </button>
+
       <button id="btnScreenshot" class="smart15-btn-export" style="background: #ebf8ff; border-color: #63b3ed; color: #2b6cb0;">
         <strong style="color:inherit;"><svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-camera"/></svg> CAPTURAR MAPA (SCREENSHOT)</strong>
       </button>
@@ -402,6 +434,10 @@ let maskDataGeoJSON = null;
 let isInfoMode = false;
 let isSwipeMode = false;
 let secondMapInstance = null;
+let ultimoResultadoSimulacao: any = null;
+let ultimaConfiguracaoSimulacao: any = null;
+let ultimaCapturaMapa: string | null = null;
+
 
 const SVG_ICONS = {
     SUCCESS: '<svg viewBox="0 0 24 24" class="s15-icon" style="stroke:#38a169"><use href="#icon-check"/></svg>',
@@ -437,6 +473,8 @@ const calculateBBox = (geojson: any) => {
     return null;
 };
 
+
+
 export const plugin = {
 	id: "smart15-orquestrador",
 	name: "Smart-15: Acessibilidade",
@@ -454,6 +492,29 @@ export const plugin = {
 					container.appendChild(wrap);
 
                     const mapObj = getMapInstance(app);
+
+                    const captureCurrentMap = (): string | null => {
+                    const currentMap = getMapInstance(app);
+
+                    if (!currentMap) {
+                      return null;
+                    }
+
+                    try {
+                      currentMap.triggerRepaint();
+
+                      return currentMap
+                        .getCanvas()
+                        .toDataURL("image/png");
+                    } catch (error) {
+                      console.warn(
+                        "Não foi possível capturar o mapa.",
+                        error,
+                      );
+
+                      return null;
+                    }
+                  };
                     
                     let tooltip = document.getElementById('smart15-tooltip');
                     if (!tooltip) {
@@ -764,6 +825,7 @@ export const plugin = {
                     const sampleCoords = wrap.querySelector("#sampleCoords") as HTMLDivElement;
 
                     const painelPosProcessamento = wrap.querySelector("#painelPosProcessamento") as HTMLDivElement;
+                    const btnGenerateReport = wrap.querySelector("#btnGenerateReport") as HTMLButtonElement;
                     const listaCamadasInput = wrap.querySelector("#listaCamadasInput") as HTMLDivElement;
                     const listaCamadas = wrap.querySelector("#listaCamadas") as HTMLDivElement;
                     const listaCamadasRasters = wrap.querySelector("#listaCamadasRasters") as HTMLDivElement;
@@ -1058,7 +1120,12 @@ export const plugin = {
                         
                         layersAtivos = []; geometriaGeoJSON = null; amostrasGeoJSON = null; maskDataGeoJSON = null; bboxCapturada = null; downloadUrlZip = null; isDrawingMode = false; 
                         painelPosProcessamento.style.display = "none"; listaCamadasInput.innerHTML = ""; listaCamadas.innerHTML = ""; listaCamadasRasters.innerHTML = ""; 
-                        
+                        ultimoResultadoSimulacao = null;
+                        ultimaConfiguracaoSimulacao = null;
+                        ultimaCapturaMapa = null;
+
+                        btnGenerateReport.style.display = "none";
+                        btnGenerateReport.disabled = true;
                         areaStatus.innerText = "Nenhum limite definido."; areaCoords.innerText = ""; 
                         sampleStatus.innerHTML = "Nenhuma amostra carregada"; sampleStatus.style.color = "#4a5568"; sampleCoords.innerText = "";
                         (wrap.querySelector("#rasterLegendsContainer") as HTMLDivElement).style.display = "none";
@@ -1163,6 +1230,94 @@ export const plugin = {
 
                     (window as any).simProgressInterval = null;
 
+                    btnGenerateReport.addEventListener(
+                      "click",
+                      () => {
+                        if (!ultimoResultadoSimulacao) {
+                          alert(
+                            "Execute uma simulação antes de gerar o relatório."
+                          );
+
+                          return;
+                        }
+
+                        if (!ultimoResultadoSimulacao.report) {
+                          alert(
+                            "O backend não retornou os dados técnicos do relatório."
+                          );
+
+                          console.error(
+                            "Resultado recebido:",
+                            ultimoResultadoSimulacao,
+                          );
+
+                          return;
+                        }
+
+                        try {
+                          btnGenerateReport.disabled = true;
+                          btnGenerateReport.innerText =
+                            "GERANDO RELATÓRIO...";
+
+                          const captureResult =
+                            captureMapAsDataUrl(
+                              getMapInstance(app),
+                            );
+
+                            ultimaCapturaMapa =
+                            captureResult.dataUrl;
+
+                          if (captureResult.error) {
+                            console.warn(
+                              captureResult.error,
+                            );
+                          }
+
+                          const reportData =
+                            adaptSimulationToReport({
+                              simulation: ultimoResultadoSimulacao,
+                              configuration:
+                                ultimaConfiguracaoSimulacao,
+                              mapImage: ultimaCapturaMapa,
+                              studyGeometry:
+                                geometriaGeoJSON,
+                            });
+
+                          openPrintableReport(reportData);
+                        } catch (error) {
+                          console.error(
+                            "Erro ao gerar relatório:",
+                            error,
+                          );
+
+                          alert(
+                            "Não foi possível gerar o relatório técnico."
+                          );
+                        } finally {
+                          btnGenerateReport.disabled = false;
+                          btnGenerateReport.innerHTML = `
+                            <strong
+                              style="
+                                color: inherit;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                              "
+                            >
+                              <svg
+                                viewBox="0 0 24 24"
+                                class="s15-icon s15-icon-btn"
+                              >
+                                <use href="#icon-book"/>
+                              </svg>
+
+                              GERAR RELATÓRIO TÉCNICO
+                            </strong>
+                          `;
+                        }
+                      },
+                    );
+
                     (wrap.querySelector("#btnSimular") as HTMLButtonElement).addEventListener("click", async () => {
                         if (!geometriaGeoJSON) { alert("Defina a Área de Estudo primeiro."); return; }
                         const btnSimular = wrap.querySelector("#btnSimular") as HTMLButtonElement; btnSimular.innerText = "PROCESSANDO..."; btnSimular.disabled = true;
@@ -1201,11 +1356,60 @@ export const plugin = {
                             if(pData.modo_dem === 'manual' && fileDemInput.files && fileDemInput.files[0]) formData.append("file_dem", fileDemInput.files[0]);
                             if(amostrasGeoJSON) formData.append("file_samples", new Blob([JSON.stringify(amostrasGeoJSON)], {type:'application/json'}));
 
-                            const res = await fetch("/api/simular", { method: "POST", body: formData }).then(r=>r.json());
+                            const response = await fetch(
+                              "/api/simular",
+                              {
+                                method: "POST",
+                                body: formData,
+                              },
+                            );
+
+                            if (!response.ok) {
+                              throw new Error(
+                                `Falha HTTP ${response.status}`
+                              );
+                            }
+
+                            const res = await response.json();
+
+                            if (res.status !== "sucesso" || !res.data) {
+                              throw new Error(
+                                res.mensagem
+                                || "A simulação não retornou dados válidos."
+                              );
+                            }
+
+                            ultimoResultadoSimulacao = res.data;
+                            ultimaConfiguracaoSimulacao = pData;
+
+                            console.log(
+                              "Relatório retornado pelo backend:",
+                              res.data.report,
+                            );
+
+                            btnGenerateReport.style.display =
+                              res.data.report
+                                ? "flex"
+                                : "none";
+
+                            btnGenerateReport.disabled =
+                              !res.data.report;
+                            //let ultimoResultadoSimulacao: any = null;
                             clearInterval((window as any).simProgressInterval); progressValue=90; progressBar.style.width="90%"; progressText.innerText="90%"; progressLabel.innerHTML = SVG_ICONS.SUCCESS + " Desenhando na Tela...";
 
                             if (res.data) {
                                 downloadUrlZip = res.data.download_url; maskDataGeoJSON = res.data.mask_geojson;
+                                if (res.data.report) {
+                                  btnGenerateReport.style.display = "flex";
+                                  btnGenerateReport.disabled = false;
+                                } else {
+                                  btnGenerateReport.style.display = "none";
+
+                                  console.warn(
+                                    "A resposta da simulação não contém data.report.",
+                                    res.data,
+                                  );
+                                }
                                 const mapObj = getMapInstance(app); painelPosProcessamento.style.display = "block"; listaCamadas.innerHTML = ""; listaCamadasRasters.innerHTML = "";
                                 const rasterLegends = wrap.querySelector("#rasterLegendsContainer") as HTMLDivElement;
                                 rasterLegends.innerHTML = `<b style="display: block; margin-bottom: 6px;">Valores Exatos dos Rasters (Mín / Máx):</b>`;
