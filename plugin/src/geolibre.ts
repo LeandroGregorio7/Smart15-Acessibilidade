@@ -80,6 +80,7 @@ const painelHtml = `
       <g id="icon-warn"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></g>
       <g id="icon-circle-fill"><circle cx="12" cy="12" r="10"/></g>
       <g id="icon-camera"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></g>
+      <g id="icon-map"><polygon points="1 6 8 2 16 6 23 2 23 18 16 22 8 18 1 22 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></g>
     </defs>
   </svg>
 
@@ -166,14 +167,41 @@ const painelHtml = `
     </div>
 
     <div style="margin-bottom: 24px; border-top: 1px solid; padding-top: 16px;" class="s15-border">
-      <label class="s15-label" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 4px;">2. Amostras (Treinamento IA)</label>
-      <div style="display: flex; flex-direction: column; gap: 6px;">
-        <input type="file" id="sampleFileInput" accept=".geojson,.kml,.zip" style="display: none;" />
-        <button id="btnUploadSamples" class="s15-card s15-text" style="width: 100%; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: 500; cursor: pointer; display:flex; align-items:center; justify-content:center;">
-            <svg viewBox="0 0 24 24" class="s15-icon"><use href="#icon-import"/></svg> Subir Ficheiro de Amostras
-        </button>
+      <label class="s15-label" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 4px;">2. Amostras Locais (Treinamento IA)</label>
+
+      <div style="margin-bottom: 10px; background-color: #f0fdf4; border: 1px dashed #4ade80; padding: 8px; border-radius: 4px;">
+        <label style="font-size: 11px; font-weight: bold; color: #166534; display: flex; align-items: center; margin-bottom: 4px;">
+          <svg viewBox="0 0 24 24" class="s15-icon"><use href="#icon-map"/></svg> Mapa de fundo
+        </label>
+        <select id="basemapSelect" style="width: 100%; padding: 6px; border-radius: 4px; border: 1px solid #4ade80; font-size: 11px; cursor: pointer;">
+          <option value="default">Rua / padrão do GeoLibre</option>
+          <option value="satellite">Satélite (Esri World Imagery)</option>
+        </select>
+        <span style="font-size: 9px; color: #1c4532; display:block; margin-top:4px;">Use o satélite como referência para desenhar árvores, telhados e demais classes.</span>
       </div>
-      <div id="sampleStatus" class="s15-text" style="font-size: 11px; margin-top: 6px; font-style: italic;">Nenhuma amostra carregada</div>
+
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <input type="file" id="sampleFileInput" accept=".geojson,.json" style="display: none;" />
+        <button id="btnUploadSamples" class="s15-card s15-text" style="width: 100%; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: 500; cursor: pointer; display:flex; align-items:center; justify-content:center;">
+          <svg viewBox="0 0 24 24" class="s15-icon"><use href="#icon-import"/></svg> Enviar arquivo de amostras
+        </button>
+
+        <div style="display: flex; gap: 4px; align-items: center;">
+          <select id="drawSampleClass" class="s15-border s15-text" style="flex: 2; padding: 6px; border-radius: 4px; border-width: 1px; font-size: 11px; cursor: pointer; background-color: #fff;">
+            <option value="1">1 - Asfalto / Via</option>
+            <option value="2">2 - Calçada / Passeio</option>
+            <option value="3">3 - Construção / Telhado</option>
+            <option value="4">4 - Árvore</option>
+            <option value="5">5 - Grama / Rasteira</option>
+            <option value="6">6 - Terra Exposta</option>
+          </select>
+          <button id="btnDrawSample" class="draw-tool" title="Desenhar amostra no mapa" style="flex: 1; padding: 6px; border-radius: 4px; cursor: pointer; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:bold;">
+            <svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-poly"/></svg> Desenhar
+          </button>
+        </div>
+      </div>
+
+      <div id="sampleStatus" class="s15-text" style="font-size: 11px; margin-top: 6px; font-style: italic;">Nenhuma amostra desenhada ou carregada</div>
       <div id="sampleCoords" style="font-family: monospace; font-size: 10px; color: #c05621; margin-top: 4px; word-break: break-all;"></div>
     </div>
 
@@ -424,16 +452,52 @@ const painelHtml = `
   </div>
 `;
 
-let bboxCapturada = null;
-let geometriaGeoJSON = null;
-let amostrasGeoJSON = null;
+type SampleProperties = {
+    classe: number;
+    classe_nome: string;
+};
+
+type SamplePolygonFeature = {
+    type: "Feature";
+    properties: SampleProperties;
+    geometry: {
+        type: "Polygon";
+        coordinates: number[][][];
+    };
+};
+
+type SampleFeatureCollection = {
+    type: "FeatureCollection";
+    features: SamplePolygonFeature[];
+};
+
+const SAMPLE_SOURCE_ID = "smart15-input-samples";
+const SAMPLE_FILL_LAYER_ID = `${SAMPLE_SOURCE_ID}-fill`;
+const SAMPLE_LINE_LAYER_ID = `${SAMPLE_SOURCE_ID}-line`;
+const SATELLITE_SOURCE_ID = "smart15-esri-satellite";
+const SATELLITE_LAYER_ID = "smart15-satellite-layer";
+
+const SAMPLE_CLASSES: Record<number, string> = {
+    1: "Asfalto / Via",
+    2: "Calçada / Passeio",
+    3: "Construção / Telhado",
+    4: "Árvore",
+    5: "Grama / Rasteira",
+    6: "Terra Exposta"
+};
+
+type BBox = [number, number, number, number];
+
+let bboxCapturada: BBox | null = null;
+let geometriaGeoJSON: any = null;
+let amostrasGeoJSON: SampleFeatureCollection | null = null;
 let isDrawingMode = false;
-let layersAtivos = [];
-let downloadUrlZip = null;
-let maskDataGeoJSON = null;
+let layersAtivos: string[] = [];
+let downloadUrlZip: string | null = null;
+let maskDataGeoJSON: string | null = null;
 let isInfoMode = false;
 let isSwipeMode = false;
-let secondMapInstance = null;
+let secondMapInstance: any = null;
 let ultimoResultadoSimulacao: any = null;
 let ultimaConfiguracaoSimulacao: any = null;
 let ultimaCapturaMapa: string | null = null;
@@ -492,30 +556,7 @@ export const plugin = {
 					container.appendChild(wrap);
 
                     const mapObj = getMapInstance(app);
-
-                    const captureCurrentMap = (): string | null => {
-                    const currentMap = getMapInstance(app);
-
-                    if (!currentMap) {
-                      return null;
-                    }
-
-                    try {
-                      currentMap.triggerRepaint();
-
-                      return currentMap
-                        .getCanvas()
-                        .toDataURL("image/png");
-                    } catch (error) {
-                      console.warn(
-                        "Não foi possível capturar o mapa.",
-                        error,
-                      );
-
-                      return null;
-                    }
-                  };
-                    
+                   
                     let tooltip = document.getElementById('smart15-tooltip');
                     if (!tooltip) {
                         tooltip = document.createElement('div');
@@ -754,7 +795,7 @@ export const plugin = {
                         } else {
                             const sDiv = document.getElementById('smart15-swipe-div'); if (sDiv) sDiv.remove();
                             const hDiv = document.getElementById('smart15-swipe-handle'); if (hDiv) hDiv.remove();
-                            mapContainer.querySelectorAll('.smart15-swipe-label').forEach(el => el.remove());
+                            mapContainer.querySelectorAll(".smart15-swipe-label").forEach((el: Element) => el.remove());
                             if (secondMapInstance) { (secondMapInstance as any).remove(); secondMapInstance = null; }
                             
                             if (moveSyncHandler) { mapObj.off('move', moveSyncHandler); moveSyncHandler = null; }
@@ -820,9 +861,12 @@ export const plugin = {
                     const btnReset = wrap.querySelector("#btnReset") as HTMLButtonElement;
                     const areaCoords = wrap.querySelector("#areaCoords") as HTMLDivElement;
                     
-                    const sampleFileInput = wrap.querySelector("#sampleFileInput") as HTMLInputElement; 
-                    const sampleStatus = wrap.querySelector("#sampleStatus") as HTMLDivElement; 
+                    const sampleFileInput = wrap.querySelector("#sampleFileInput") as HTMLInputElement;
+                    const sampleStatus = wrap.querySelector("#sampleStatus") as HTMLDivElement;
                     const sampleCoords = wrap.querySelector("#sampleCoords") as HTMLDivElement;
+                    const basemapSelect = wrap.querySelector("#basemapSelect") as HTMLSelectElement;
+                    const drawSampleClass = wrap.querySelector("#drawSampleClass") as HTMLSelectElement;
+                    const btnDrawSample = wrap.querySelector("#btnDrawSample") as HTMLButtonElement;
 
                     const painelPosProcessamento = wrap.querySelector("#painelPosProcessamento") as HTMLDivElement;
                     const btnGenerateReport = wrap.querySelector("#btnGenerateReport") as HTMLButtonElement;
@@ -1041,7 +1085,122 @@ export const plugin = {
                         tools.appendChild(btnUp); tools.appendChild(btnDown); tools.appendChild(btnVis); row.appendChild(span); row.appendChild(tools); container.appendChild(row);
                     };
 
-                    const startDrawing = (mode: string) => {
+                    const removeSampleLayers = () => {
+                        const currentMap = getMapInstance(app);
+                        if (!currentMap) return;
+
+                        if (currentMap.getLayer(SAMPLE_LINE_LAYER_ID)) currentMap.removeLayer(SAMPLE_LINE_LAYER_ID);
+                        if (currentMap.getLayer(SAMPLE_FILL_LAYER_ID)) currentMap.removeLayer(SAMPLE_FILL_LAYER_ID);
+                        if (currentMap.getSource(SAMPLE_SOURCE_ID)) currentMap.removeSource(SAMPLE_SOURCE_ID);
+
+                        layersAtivos = layersAtivos.filter(
+                            (id) => id !== SAMPLE_FILL_LAYER_ID && id !== SAMPLE_LINE_LAYER_ID
+                        );
+                    };
+
+                    const renderSampleLayers = () => {
+                        const currentMap = getMapInstance(app);
+                        if (!currentMap || !amostrasGeoJSON) return;
+
+                        const source = currentMap.getSource(SAMPLE_SOURCE_ID);
+                        if (source && typeof source.setData === "function") {
+                            source.setData(amostrasGeoJSON);
+                        } else {
+                            currentMap.addSource(SAMPLE_SOURCE_ID, {
+                                type: "geojson",
+                                data: amostrasGeoJSON
+                            });
+                        }
+
+                        const colorExpression = [
+                            "match",
+                            ["get", "classe"],
+                            1, "#4a5568",
+                            2, "#a0aec0",
+                            3, "#c05621",
+                            4, "#2f855a",
+                            5, "#68d391",
+                            6, "#d69e2e",
+                            "#805ad5"
+                        ];
+
+                        if (!currentMap.getLayer(SAMPLE_FILL_LAYER_ID)) {
+                            currentMap.addLayer({
+                                id: SAMPLE_FILL_LAYER_ID,
+                                type: "fill",
+                                source: SAMPLE_SOURCE_ID,
+                                paint: {
+                                    "fill-color": colorExpression,
+                                    "fill-opacity": 0.42
+                                }
+                            });
+                            layersAtivos.push(SAMPLE_FILL_LAYER_ID);
+                            appendLayerToggle(SAMPLE_FILL_LAYER_ID, "Amostras IA", listaCamadasInput);
+                        }
+
+                        if (!currentMap.getLayer(SAMPLE_LINE_LAYER_ID)) {
+                            currentMap.addLayer({
+                                id: SAMPLE_LINE_LAYER_ID,
+                                type: "line",
+                                source: SAMPLE_SOURCE_ID,
+                                paint: {
+                                    "line-color": colorExpression,
+                                    "line-width": 2
+                                }
+                            });
+                            layersAtivos.push(SAMPLE_LINE_LAYER_ID);
+                        }
+                    };
+
+                    const setSatelliteVisibility = (visible: boolean) => {
+                        const currentMap = getMapInstance(app);
+                        if (!currentMap) return;
+
+                        if (!currentMap.getSource(SATELLITE_SOURCE_ID)) {
+                            currentMap.addSource(SATELLITE_SOURCE_ID, {
+                                type: "raster",
+                                tiles: [
+                                    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                                ],
+                                tileSize: 256,
+                                attribution: "Esri"
+                            });
+                        }
+
+                        if (!currentMap.getLayer(SATELLITE_LAYER_ID)) {
+                            const firstOverlayLayer = currentMap
+                                .getStyle()
+                                .layers
+                                ?.find((layer: any) =>
+                                    layer.id.startsWith("smart15-") &&
+                                    layer.id !== SATELLITE_LAYER_ID
+                                );
+
+                            currentMap.addLayer(
+                                {
+                                    id: SATELLITE_LAYER_ID,
+                                    type: "raster",
+                                    source: SATELLITE_SOURCE_ID,
+                                    layout: {
+                                        visibility: visible ? "visible" : "none"
+                                    }
+                                },
+                                firstOverlayLayer?.id
+                            );
+                        } else {
+                            currentMap.setLayoutProperty(
+                                SATELLITE_LAYER_ID,
+                                "visibility",
+                                visible ? "visible" : "none"
+                            );
+                        }
+                    };
+
+                    basemapSelect.addEventListener("change", () => {
+                        setSatelliteVisibility(basemapSelect.value === "satellite");
+                    });
+
+                    const startDrawing = (mode: string, isSample = false) => {
                         if (isDrawingMode) return; isDrawingMode = true;
                         const mapCanvas = document.querySelector(".maplibregl-canvas"); const mapContainer = mapCanvas ? mapCanvas.parentElement : null;
                         const mapObj = getMapInstance(app);
@@ -1054,15 +1213,41 @@ export const plugin = {
                         const getPos = (e: any) => { const r = overlay.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
 
                         const finishDrawing = () => {
-                            overlay.remove(); if (mapObj && mapObj.dragPan) mapObj.dragPan.enable(); isDrawingMode = false;
-                            if (geometriaGeoJSON && bboxCapturada) {
-                                areaStatus.innerHTML = SVG_ICONS.SUCCESS + " Capturado!"; areaStatus.style.color = "#2f855a";
+                            overlay.remove();
+                            if (mapObj && mapObj.dragPan) mapObj.dragPan.enable();
+                            isDrawingMode = false;
+
+                            if (!isSample && geometriaGeoJSON && bboxCapturada) {
+                                areaStatus.innerHTML = SVG_ICONS.SUCCESS + " Capturado!";
+                                areaStatus.style.color = "#2f855a";
                                 areaCoords.innerText = "BBox: [" + bboxCapturada[0].toFixed(4) + ", " + bboxCapturada[1].toFixed(4) + ", " + bboxCapturada[2].toFixed(4) + ", " + bboxCapturada[3].toFixed(4) + "]";
-                                const sourceId = 'smart15-input-area';
-                                if (!mapObj.getSource(sourceId)) { mapObj.addSource(sourceId, { type: 'geojson', data: geometriaGeoJSON }); } else { mapObj.getSource(sourceId).setData(geometriaGeoJSON); }
-                                if (!mapObj.getLayer(sourceId+'-fill')) { mapObj.addLayer({ id: sourceId+'-fill', type: 'fill', source: sourceId, paint: { 'fill-color': corArea.value, 'fill-opacity': 0.1 } }); layersAtivos.push(sourceId+'-fill'); }
-                                if (!mapObj.getLayer(sourceId+'-line')) { mapObj.addLayer({ id: sourceId+'-line', type: 'line', source: sourceId, paint: { 'line-color': corArea.value, 'line-width': 2, 'line-opacity': 0 } }); layersAtivos.push(sourceId+'-line'); }
-                                painelPosProcessamento.style.display = "block"; appendLayerToggle(sourceId+'-fill', "Área Geográfica (Base)", listaCamadasInput); updateLayerStyle();
+                                const sourceId = "smart15-input-area";
+                                if (!mapObj.getSource(sourceId)) {
+                                    mapObj.addSource(sourceId, { type: "geojson", data: geometriaGeoJSON });
+                                } else {
+                                    mapObj.getSource(sourceId).setData(geometriaGeoJSON);
+                                }
+                                if (!mapObj.getLayer(sourceId + "-fill")) {
+                                    mapObj.addLayer({
+                                        id: sourceId + "-fill",
+                                        type: "fill",
+                                        source: sourceId,
+                                        paint: { "fill-color": corArea.value, "fill-opacity": 0.1 }
+                                    });
+                                    layersAtivos.push(sourceId + "-fill");
+                                }
+                                if (!mapObj.getLayer(sourceId + "-line")) {
+                                    mapObj.addLayer({
+                                        id: sourceId + "-line",
+                                        type: "line",
+                                        source: sourceId,
+                                        paint: { "line-color": corArea.value, "line-width": 2, "line-opacity": 0 }
+                                    });
+                                    layersAtivos.push(sourceId + "-line");
+                                }
+                                painelPosProcessamento.style.display = "block";
+                                appendLayerToggle(sourceId + "-fill", "Área Geográfica (Base)", listaCamadasInput);
+                                updateLayerStyle();
                             }
                         };
 
@@ -1073,7 +1258,14 @@ export const plugin = {
                             const onUp = (ev: any) => { ev.preventDefault(); if (!isDrawing) return; isDrawing = false; window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); const end = getPos(ev); if (Math.abs(end.x - start.x) > 10) { const nw = mapObj.unproject([Math.min(start.x, end.x), Math.min(start.y, end.y)]); const se = mapObj.unproject([Math.max(start.x, end.x), Math.max(start.y, end.y)]); bboxCapturada = [Math.min(nw.lng, se.lng), Math.min(nw.lat, se.lat), Math.max(nw.lng, se.lng), Math.max(nw.lat, se.lat)]; geometriaGeoJSON = { type: "Feature", geometry: { type: "Polygon", coordinates: [[[nw.lng, nw.lat], [se.lng, nw.lat], [se.lng, se.lat], [nw.lng, se.lat], [nw.lng, nw.lat]]] } }; } finishDrawing(); };
                             overlay.addEventListener("pointerdown", (e: any) => { e.preventDefault(); isDrawing = true; start = getPos(e); rectEl = document.createElementNS("http://www.w3.org/2000/svg", "rect"); rectEl.setAttribute("fill", "rgba(49, 130, 206, 0.2)"); rectEl.setAttribute("stroke", "#3182ce"); rectEl.setAttribute("stroke-width", "2"); svg.appendChild(rectEl); window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp); });
                         } else if (mode === "poly") {
-                            areaStatus.innerText = "Clique no mapa. DIREITO para fechar."; areaCoords.innerText = "";
+                            if (isSample) {
+                                sampleStatus.innerText = "Clique no mapa. Use o botão direito para fechar a amostra.";
+                                sampleStatus.style.color = "#2b6cb0";
+                                sampleCoords.innerText = "";
+                            } else {
+                                areaStatus.innerText = "Clique no mapa. DIREITO para fechar.";
+                                areaCoords.innerText = "";
+                            }
                             let polyEl = document.createElementNS('http://www.w3.org/2000/svg', 'polygon'); polyEl.setAttribute('fill', 'rgba(49, 130, 206, 0.15)'); polyEl.setAttribute('stroke', '#2b6cb0'); polyEl.setAttribute('stroke-width', '2'); svg.appendChild(polyEl);
                             let guideLineEl = document.createElementNS('http://www.w3.org/2000/svg', 'polyline'); guideLineEl.setAttribute('fill', 'none'); guideLineEl.setAttribute('stroke', '#2b6cb0'); guideLineEl.setAttribute('stroke-width', '1'); guideLineEl.setAttribute('stroke-dasharray', '4,4'); svg.appendChild(guideLineEl);
                             let ptsTela: any[] = []; let coordsGeo: any[] = [];
@@ -1081,8 +1273,77 @@ export const plugin = {
                             overlay.addEventListener("pointerdown", (e: any) => {
                                 e.preventDefault(); const pos = getPos(e);
                                 if (e.button === 2) {
-                                    if (coordsGeo.length >= 3) { coordsGeo.push([coordsGeo[0][0], coordsGeo[0][1]]); geometriaGeoJSON = { type: "Feature", geometry: { type: "Polygon", coordinates: [coordsGeo] } }; const lons = coordsGeo.map(c => c[0]), lats = coordsGeo.map(c => c[1]); bboxCapturada = [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)]; }
-                                    window.removeEventListener("pointermove", onMove); finishDrawing(); return;
+                                    if (coordsGeo.length >= 3) {
+                                        coordsGeo.push([coordsGeo[0][0], coordsGeo[0][1]]);
+
+                                        if (isSample) {
+                                            const classe = Number(drawSampleClass.value);
+                                            const classeNome = SAMPLE_CLASSES[classe];
+
+                                            if (!classeNome) {
+                                                sampleStatus.innerHTML = SVG_ICONS.WARN + " Classe de amostra inválida.";
+                                                sampleStatus.style.color = "#e53e3e";
+                                            } else {
+                                                if (!amostrasGeoJSON) {
+                                                    amostrasGeoJSON = {
+                                                        type: "FeatureCollection",
+                                                        features: []
+                                                    };
+                                                }
+
+                                                amostrasGeoJSON.features.push({
+                                                    type: "Feature",
+                                                    properties: {
+                                                        classe,
+                                                        classe_nome: classeNome
+                                                    },
+                                                    geometry: {
+                                                        type: "Polygon",
+                                                        coordinates: [coordsGeo]
+                                                    }
+                                                });
+
+                                                renderSampleLayers();
+
+                                                sampleStatus.innerHTML =
+                                                    SVG_ICONS.SUCCESS +
+                                                    " " +
+                                                    amostrasGeoJSON.features.length +
+                                                    " amostra(s) em memória.";
+                                                sampleStatus.style.color = "#2f855a";
+                                                sampleCoords.innerText =
+                                                    "Última classe: " +
+                                                    classe +
+                                                    " - " +
+                                                    classeNome;
+                                            }
+                                        } else {
+                                            geometriaGeoJSON = {
+                                                type: "Feature",
+                                                geometry: {
+                                                    type: "Polygon",
+                                                    coordinates: [coordsGeo]
+                                                }
+                                            };
+                                            const lons = coordsGeo.map((c) => c[0]);
+                                            const lats = coordsGeo.map((c) => c[1]);
+                                            bboxCapturada = [
+                                                Math.min(...lons),
+                                                Math.min(...lats),
+                                                Math.max(...lons),
+                                                Math.max(...lats)
+                                            ];
+                                        }
+                                    } else if (isSample) {
+                                        sampleStatus.innerHTML =
+                                            SVG_ICONS.WARN +
+                                            " A amostra precisa de pelo menos três pontos.";
+                                        sampleStatus.style.color = "#e53e3e";
+                                    }
+
+                                    window.removeEventListener("pointermove", onMove);
+                                    finishDrawing();
+                                    return;
                                 }
                                 if (e.button === 0) { const lngLat = mapObj.unproject([pos.x, pos.y]); ptsTela.push(pos); coordsGeo.push([lngLat.lng, lngLat.lat]); polyEl.setAttribute('points', ptsTela.map(p => p.x + "," + p.y).join(' ')); }
                             });
@@ -1105,12 +1366,17 @@ export const plugin = {
                         }
                     };
 
-                    (wrap.querySelector("#btnDrawRect") as HTMLButtonElement).addEventListener("click", () => startDrawing("rect"));
-                    (wrap.querySelector("#btnDrawPoly") as HTMLButtonElement).addEventListener("click", () => startDrawing("poly"));
-                    (wrap.querySelector("#btnDrawCircle") as HTMLButtonElement).addEventListener("click", () => startDrawing("circle"));
+                    (wrap.querySelector("#btnDrawRect") as HTMLButtonElement).addEventListener("click", () => startDrawing("rect", false));
+                    (wrap.querySelector("#btnDrawPoly") as HTMLButtonElement).addEventListener("click", () => startDrawing("poly", false));
+                    (wrap.querySelector("#btnDrawCircle") as HTMLButtonElement).addEventListener("click", () => startDrawing("circle", false));
+                    btnDrawSample.addEventListener("click", () => startDrawing("poly", true));
 
                     btnReset.addEventListener("click", () => {
                         const mapObj = getMapInstance(app);
+                        removeSampleLayers();
+                        setSatelliteVisibility(false);
+                        basemapSelect.value = "default";
+
                         if (mapObj) { 
                             if (mapObj.getLayer('smart15-mask-layer')) mapObj.removeLayer('smart15-mask-layer');
                             if (mapObj.getSource('smart15-mask-src')) mapObj.removeSource('smart15-mask-src');
@@ -1127,7 +1393,10 @@ export const plugin = {
                         btnGenerateReport.style.display = "none";
                         btnGenerateReport.disabled = true;
                         areaStatus.innerText = "Nenhum limite definido."; areaCoords.innerText = ""; 
-                        sampleStatus.innerHTML = "Nenhuma amostra carregada"; sampleStatus.style.color = "#4a5568"; sampleCoords.innerText = "";
+                        sampleStatus.innerHTML = "Nenhuma amostra desenhada ou carregada";
+                        sampleStatus.style.color = "#4a5568";
+                        sampleCoords.innerText = "";
+                        sampleFileInput.value = "";
                         (wrap.querySelector("#rasterLegendsContainer") as HTMLDivElement).style.display = "none";
                         
                         clearInterval((window as any).simProgressInterval); (wrap.querySelector("#progressContainer") as HTMLDivElement).style.display = "none";
@@ -1160,44 +1429,124 @@ export const plugin = {
                         }
                     });
 
-                    (wrap.querySelector("#btnUploadSamples") as HTMLButtonElement).addEventListener("click", (e: any) => { e.preventDefault(); sampleFileInput.click(); });
+                    (wrap.querySelector("#btnUploadSamples") as HTMLButtonElement).addEventListener("click", (e: any) => {
+                        e.preventDefault();
+                        sampleFileInput.click();
+                    });
+
                     sampleFileInput.addEventListener("change", (e: any) => {
-                        const file = e.target.files[0]; if (file) {
-                            
-                            sampleStatus.innerHTML = SVG_ICONS.LOAD + " Lendo amostras...";
-                            sampleStatus.style.color = "#d69e2e";
-                            
-                            const reader = new FileReader(); reader.onload = (ev: any) => { try {
-                                amostrasGeoJSON = JSON.parse(ev.target.result);
-                                const b = calculateBBox(amostrasGeoJSON);
-                                if(b) sampleCoords.innerText = "BBox: [" + b[0][0].toFixed(4) + ", " + b[0][1].toFixed(4) + ", " + b[1][0].toFixed(4) + ", " + b[1][1].toFixed(4) + "]";
-                                
-                                const mapObj = getMapInstance(app); 
-                                if(mapObj) {
-                                    const sId = 'smart15-input-samples'; 
-                                    if(!mapObj.getSource(sId)) mapObj.addSource(sId, {type:'geojson', data:amostrasGeoJSON}); 
-                                    else mapObj.getSource(sId).setData(amostrasGeoJSON);
-                                    
-                                    const isPolygon = amostrasGeoJSON.features && amostrasGeoJSON.features[0] && (amostrasGeoJSON.features[0].geometry.type.includes('Polygon'));
-                                    
-                                    if(isPolygon) {
-                                        if(!mapObj.getLayer(sId+'-fill')) { mapObj.addLayer({id:sId+'-fill', type:'fill', source:sId, paint:{'fill-color':corOsm.value, 'fill-opacity':contornoOsm.checked ? 0 : (parseInt(opacOsm.value)/100)}}); layersAtivos.push(sId+'-fill'); }
-                                        if(!mapObj.getLayer(sId+'-line')) { mapObj.addLayer({id:sId+'-line', type:'line', source:sId, paint:{'line-color':corOsm.value, 'line-width':contornoOsm.checked ? 2 : 0}}); layersAtivos.push(sId+'-line'); }
-                                        appendLayerToggle(sId+'-fill', "Amostras", listaCamadasInput);
-                                    } else {
-                                        if(!mapObj.getLayer(sId+'-circle')) { mapObj.addLayer({id:sId+'-circle', type:'circle', source:sId, paint:{'circle-radius':5, 'circle-color':corOsm.value, 'circle-opacity':contornoOsm.checked ? 0 : (parseInt(opacOsm.value)/100), 'circle-stroke-width': contornoOsm.checked ? 2 : 0, 'circle-stroke-color': corOsm.value}}); layersAtivos.push(sId+'-circle'); }
-                                        appendLayerToggle(sId+'-circle', "Amostras", listaCamadasInput);
-                                    }
-                                    updateLayerStyle();
-                                    
-                                    sampleStatus.innerHTML = SVG_ICONS.SUCCESS + " " + file.name; 
-                                    sampleStatus.style.color = "#2f855a";
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+
+                        sampleStatus.innerHTML = SVG_ICONS.LOAD + " Lendo amostras...";
+                        sampleStatus.style.color = "#d69e2e";
+
+                        const reader = new FileReader();
+
+                        reader.onload = (ev: any) => {
+                            try {
+                                const rawText = String(ev.target?.result ?? "")
+                                    .replace(/^\uFEFF/, "")
+                                    .trim();
+
+                                const parsed = JSON.parse(rawText);
+
+                                if (
+                                    parsed?.type !== "FeatureCollection" ||
+                                    !Array.isArray(parsed.features)
+                                ) {
+                                    throw new Error("O arquivo não é um FeatureCollection válido.");
                                 }
-                            } catch(e) {
-                                sampleStatus.innerHTML = SVG_ICONS.WARN + " Erro ao ler GeoJSON";
+
+                                const normalizedFeatures: SamplePolygonFeature[] =
+                                    parsed.features.map((feature: any, index: number) => {
+                                        if (
+                                            feature?.type !== "Feature" ||
+                                            feature?.geometry?.type !== "Polygon"
+                                        ) {
+                                            throw new Error(
+                                                `A feição ${index + 1} não é um polígono válido.`
+                                            );
+                                        }
+
+                                        const rawClass =
+                                            feature.properties?.classe ??
+                                            feature.properties?.class;
+                                        const classe = Number(rawClass);
+                                        const classeNome =
+                                            SAMPLE_CLASSES[classe] ??
+                                            feature.properties?.classe_nome;
+
+                                        if (!Number.isInteger(classe) || !SAMPLE_CLASSES[classe]) {
+                                            throw new Error(
+                                                `A feição ${index + 1} possui classe inválida.`
+                                            );
+                                        }
+
+                                        return {
+                                            type: "Feature",
+                                            properties: {
+                                                classe,
+                                                classe_nome: classeNome
+                                            },
+                                            geometry: {
+                                                type: "Polygon",
+                                                coordinates: feature.geometry.coordinates
+                                            }
+                                        };
+                                    });
+
+                                amostrasGeoJSON = {
+                                    type: "FeatureCollection",
+                                    features: normalizedFeatures
+                                };
+
+                                renderSampleLayers();
+
+                                const bbox = calculateBBox(amostrasGeoJSON);
+                                if (bbox) {
+                                    sampleCoords.innerText =
+                                        "BBox: [" +
+                                        bbox[0][0].toFixed(4) +
+                                        ", " +
+                                        bbox[0][1].toFixed(4) +
+                                        ", " +
+                                        bbox[1][0].toFixed(4) +
+                                        ", " +
+                                        bbox[1][1].toFixed(4) +
+                                        "]";
+                                }
+
+                                sampleStatus.innerHTML =
+                                    SVG_ICONS.SUCCESS +
+                                    " " +
+                                    amostrasGeoJSON.features.length +
+                                    " amostra(s) carregada(s) de " +
+                                    file.name;
+                                sampleStatus.style.color = "#2f855a";
+                            } catch (error) {
+                                console.error(
+                                    "[Smart15] Erro ao carregar amostras:",
+                                    error
+                                );
+                                sampleStatus.innerHTML =
+                                    SVG_ICONS.WARN +
+                                    " Erro ao ler o GeoJSON de amostras.";
                                 sampleStatus.style.color = "#e53e3e";
-                            } }; reader.readAsText(file);
-                        }
+                            } finally {
+                                sampleFileInput.value = "";
+                            }
+                        };
+
+                        reader.onerror = () => {
+                            sampleStatus.innerHTML =
+                                SVG_ICONS.WARN +
+                                " Falha durante a leitura do arquivo.";
+                            sampleStatus.style.color = "#e53e3e";
+                            sampleFileInput.value = "";
+                        };
+
+                        reader.readAsText(file);
                     });
 
                     (wrap.querySelector("#btnExportResult") as HTMLButtonElement).addEventListener("click", async () => {
@@ -1354,7 +1703,16 @@ export const plugin = {
                             if(pData.modo_temp === 'manual' && fileTempInput.files && fileTempInput.files[0]) formData.append("file_temp", fileTempInput.files[0]);
                             const fileDemInput = wrap.querySelector("#fileDem") as HTMLInputElement;
                             if(pData.modo_dem === 'manual' && fileDemInput.files && fileDemInput.files[0]) formData.append("file_dem", fileDemInput.files[0]);
-                            if(amostrasGeoJSON) formData.append("file_samples", new Blob([JSON.stringify(amostrasGeoJSON)], {type:'application/json'}));
+                            if (amostrasGeoJSON && amostrasGeoJSON.features.length > 0) {
+                                formData.append(
+                                    "file_samples",
+                                    new Blob(
+                                        [JSON.stringify(amostrasGeoJSON)],
+                                        { type: "application/geo+json" }
+                                    ),
+                                    "amostras.geojson"
+                                );
+                            }
 
                             const response = await fetch(
                               "/api/simular",
@@ -1484,8 +1842,44 @@ export const plugin = {
 		}
     },
     deactivate(app: any) {
-        const mapObj = getMapInstance(app); if (mapObj) { layersAtivos.forEach(id => { try { if(mapObj.getLayer(id)) mapObj.removeLayer(id); } catch(e){} }); layersAtivos.forEach(id => { const sId = id.replace('-line','').replace('-fill','').replace('-circle','').replace('-layer','').replace('-stroke','').replace('-grid',''); try { if(mapObj.getSource(sId)) mapObj.removeSource(sId); } catch(e){} }); }
-        layersAtivos = []; app.closeRightPanel?.("smart15-workbench");
+        const mapObj = getMapInstance(app);
+        if (mapObj) {
+            layersAtivos.forEach((id) => {
+                try {
+                    if (mapObj.getLayer(id)) mapObj.removeLayer(id);
+                } catch (error) {}
+            });
+
+            layersAtivos.forEach((id) => {
+                const sourceId = id
+                    .replace("-line", "")
+                    .replace("-fill", "")
+                    .replace("-circle", "")
+                    .replace("-layer", "")
+                    .replace("-stroke", "")
+                    .replace("-grid", "");
+                try {
+                    if (mapObj.getSource(sourceId)) mapObj.removeSource(sourceId);
+                } catch (error) {}
+            });
+
+            if (mapObj.getLayer(SAMPLE_LINE_LAYER_ID)) mapObj.removeLayer(SAMPLE_LINE_LAYER_ID);
+            if (mapObj.getLayer(SAMPLE_FILL_LAYER_ID)) mapObj.removeLayer(SAMPLE_FILL_LAYER_ID);
+            if (mapObj.getSource(SAMPLE_SOURCE_ID)) mapObj.removeSource(SAMPLE_SOURCE_ID);
+
+            if (mapObj.getLayer(SATELLITE_LAYER_ID)) mapObj.removeLayer(SATELLITE_LAYER_ID);
+            if (mapObj.getSource(SATELLITE_SOURCE_ID)) mapObj.removeSource(SATELLITE_SOURCE_ID);
+
+            mapObj.getContainer()
+                ?.querySelectorAll(".smart15-draw-overlay")
+                .forEach((element: Element) => element.remove());
+
+            if (mapObj.dragPan) mapObj.dragPan.enable();
+        }
+
+        amostrasGeoJSON = null;
+        layersAtivos = [];
+        app.closeRightPanel?.("smart15-workbench");
         const tooltip = document.getElementById('smart15-tooltip'); if(tooltip) tooltip.remove();
         const swipeDiv = document.getElementById('smart15-swipe-div'); if(swipeDiv) swipeDiv.remove();
         const swipeHandle = document.getElementById('smart15-swipe-handle'); if(swipeHandle) swipeHandle.remove();
