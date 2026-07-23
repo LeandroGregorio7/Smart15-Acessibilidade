@@ -477,6 +477,230 @@ const SAMPLE_LINE_LAYER_ID = `${SAMPLE_SOURCE_ID}-line`;
 const SATELLITE_SOURCE_ID = "smart15-esri-satellite";
 const SATELLITE_LAYER_ID = "smart15-satellite-layer";
 
+const MAX_IDENTIFIED_FEATURES = 7;
+const MAX_IDENTIFIED_PROPERTIES = 8;
+const MAX_PROPERTY_VALUE_LENGTH = 160;
+
+const IDENTIFIABLE_LAYER_TYPES = new Set([
+  "fill",
+  "line",
+  "circle",
+  "symbol",
+  "fill-extrusion",
+  "heatmap",
+]);
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function formatPropertyValue(value: unknown): string {
+  let formattedValue: string;
+
+  if (value === null || value === undefined) {
+    formattedValue = "Não informado";
+  } else if (typeof value === "object") {
+    try {
+      formattedValue = JSON.stringify(value);
+    } catch {
+      formattedValue = String(value);
+    }
+  } else {
+    formattedValue = String(value);
+  }
+
+  if (formattedValue.length > MAX_PROPERTY_VALUE_LENGTH) {
+    formattedValue =
+      formattedValue.slice(0, MAX_PROPERTY_VALUE_LENGTH) + "…";
+  }
+
+  return escapeHtml(formattedValue);
+}
+
+function getFeatureTitle(feature: any): string {
+  const properties = feature?.properties ?? {};
+
+  const preferredTitle =
+    properties.nome ??
+    properties.name ??
+    properties.label ??
+    properties.titulo ??
+    properties.title ??
+    properties.categoria ??
+    properties.tipo ??
+    properties.classe ??
+    properties.class;
+
+  if (preferredTitle !== undefined && preferredTitle !== null) {
+    return escapeHtml(preferredTitle);
+  }
+
+  return escapeHtml(
+    feature?.layer?.id
+      ?? feature?.sourceLayer
+      ?? feature?.source
+      ?? "Feição identificada",
+  );
+}
+
+function isIdentifiableFeature(feature: any): boolean {
+  if (!feature?.layer) {
+    return false;
+  }
+
+  const layerType = feature.layer.type;
+
+  if (
+    layerType
+    && !IDENTIFIABLE_LAYER_TYPES.has(layerType)
+  ) {
+    return false;
+  }
+
+  const properties = feature.properties;
+
+  return Boolean(
+    properties
+    && typeof properties === "object"
+    && Object.keys(properties).length > 0
+  );
+}
+
+function getFeatureKey(feature: any): string {
+  const properties = feature?.properties ?? {};
+
+  return [
+    feature?.layer?.id ?? "",
+    feature?.source ?? "",
+    feature?.sourceLayer ?? "",
+    feature?.id ?? "",
+    JSON.stringify(properties),
+  ].join("|");
+}
+
+function buildFeatureTooltipHtml(features: any[]): string {
+  if (features.length === 0) {
+    return `
+      <div style="color:#718096; font-style:italic;">
+        Nenhuma feição identificável neste ponto.
+      </div>
+    `;
+  }
+
+  return features
+    .slice(0, MAX_IDENTIFIED_FEATURES)
+    .map((feature) => {
+      const properties = feature.properties ?? {};
+
+      const propertyEntries = Object.entries(properties)
+        .filter(([key]) => {
+          const normalizedKey = key.toLowerCase();
+
+          return ![
+            "geometry",
+            "geom",
+            "the_geom",
+          ].includes(normalizedKey);
+        })
+        .slice(0, MAX_IDENTIFIED_PROPERTIES);
+
+      const propertyRows = propertyEntries
+        .map(([key, value]) => {
+          return `
+            <div
+              style="
+                display:grid;
+                grid-template-columns:minmax(80px, 40%) 1fr;
+                gap:6px;
+                margin-top:3px;
+              "
+            >
+              <strong
+                style="
+                  overflow-wrap:anywhere;
+                  color:#4a5568;
+                "
+              >
+                ${escapeHtml(key)}
+              </strong>
+
+              <span
+                style="
+                  overflow-wrap:anywhere;
+                  color:#1a202c;
+                "
+              >
+                ${formatPropertyValue(value)}
+              </span>
+            </div>
+          `;
+        })
+        .join("");
+
+      const hiddenPropertyCount =
+        Object.keys(properties).length - propertyEntries.length;
+
+      const hiddenPropertiesMessage =
+        hiddenPropertyCount > 0
+          ? `
+            <div
+              style="
+                margin-top:5px;
+                color:#718096;
+                font-size:11px;
+                font-style:italic;
+              "
+            >
+              + ${hiddenPropertyCount}
+              propriedade(s) não apresentada(s)
+            </div>
+          `
+          : "";
+
+      return `
+        <section
+          style="
+            margin-bottom:8px;
+            padding-bottom:8px;
+            border-bottom:1px solid #e2e8f0;
+          "
+        >
+          <div
+            style="
+              color:#2c5282;
+              font-weight:bold;
+              margin-bottom:5px;
+              overflow-wrap:anywhere;
+            "
+          >
+            ${getFeatureTitle(feature)}
+          </div>
+
+          <div
+            style="
+              color:#718096;
+              font-size:10px;
+              margin-bottom:5px;
+              overflow-wrap:anywhere;
+            "
+          >
+            Camada:
+            ${escapeHtml(feature?.layer?.id ?? "não informada")}
+          </div>
+
+          ${propertyRows}
+          ${hiddenPropertiesMessage}
+        </section>
+      `;
+    })
+    .join("");
+}
+
 const SAMPLE_CLASSES: Record<number, string> = {
     1: "Asfalto / Via",
     2: "Calçada / Passeio",
@@ -501,6 +725,7 @@ let secondMapInstance: any = null;
 let ultimoResultadoSimulacao: any = null;
 let ultimaConfiguracaoSimulacao: any = null;
 let ultimaCapturaMapa: string | null = null;
+let cleanupIdentifyHandlers: (() => void) | null = null;
 
 
 const SVG_ICONS = {
@@ -557,101 +782,296 @@ export const plugin = {
 
                     const mapObj = getMapInstance(app);
                    
-                    let tooltip = document.getElementById('smart15-tooltip');
+                    let tooltip =
+                    document.getElementById(
+                        "smart15-tooltip",
+                    ) as HTMLDivElement | null;
+
                     if (!tooltip) {
-                        tooltip = document.createElement('div');
-                        tooltip.id = 'smart15-tooltip';
-                        tooltip.style.position = 'absolute';
-                        tooltip.style.background = '#ffffff';
-                        tooltip.style.padding = '10px';
-                        tooltip.style.border = '2px solid #2b6cb0';
-                        tooltip.style.borderRadius = '6px';
-                        tooltip.style.pointerEvents = 'none';
-                        tooltip.style.display = 'none';
-                        tooltip.style.zIndex = '99999';
-                        tooltip.style.fontSize = '12px';
-                        tooltip.style.maxHeight = '300px';
-                        tooltip.style.overflowY = 'auto';
-                        tooltip.style.boxShadow = '0 4px 6px rgba(0,0,0,0.3)';
-                        document.body.appendChild(tooltip);
+                    tooltip = document.createElement("div");
+                    tooltip.id = "smart15-tooltip";
+
+                    tooltip.style.cssText = `
+                        position: fixed;
+                        display: none;
+                        z-index: 99999;
+                        width: min(520px, calc(100vw - 24px));
+                        max-width: 520px;
+                        max-height: min(70vh, 620px);
+                        overflow-y: hidden;
+                        overflow-x: hidden;
+                        padding: 10px;
+                        border: 2px solid #2b6cb0;
+                        border-radius: 6px;
+                        background: #ffffff;
+                        color: #1a202c;
+                        box-shadow:
+                        0 4px 12px rgba(0, 0, 0, 0.30);
+                        font-size: 12px;
+                        line-height: 1.35;
+                        pointer-events: none;
+                        box-sizing: border-box;
+                    `;
+
+                    document.body.appendChild(tooltip);
                     }
 
-                    if (mapObj && !(mapObj as any)._silencedMissingImages) {
-                        (mapObj as any)._silencedMissingImages = true;
-                        mapObj.on('styleimagemissing', (e: any) => {
-                            const canvas = document.createElement('canvas'); canvas.width = 1; canvas.height = 1;
-                            try { mapObj.addImage(e.id, (canvas.getContext('2d') as CanvasRenderingContext2D).getImageData(0, 0, 1, 1)); } catch(err) {}
-                        });
-                        
-                        mapObj.on('mousemove', (e: any) => {
-                            if (!isInfoMode) return;
-                            const features = mapObj.queryRenderedFeatures(e.point);
-                            const myFeats = features.filter((f: any) => f.layer.id.includes('smart15') && f.properties);
-                            
-                            if (myFeats.length > 0) {
-                                tooltip!.style.display = 'block';
-                                tooltip!.style.left = (e.originalEvent.pageX + 15) + 'px';
-                                tooltip!.style.top = (e.originalEvent.pageY + 15) + 'px';
-                                
-                                let innerHTML = '';
-                                const seen = new Set();
-                                
-                                myFeats.forEach((f: any) => {
-                                    const props = f.properties;
-                                    const strProps = JSON.stringify(props);
-                                    if(seen.has(strProps)) return; 
-                                    seen.add(strProps);
-                                    
-                                    if (props.tipo === 'isocronas' || props.tipo === 'hexagonos') {
-                                        innerHTML += `<div style="margin-bottom:6px; border-bottom:1px solid #e2e8f0; padding-bottom:4px;">
-                                            <span style="color:#2c5282;"><b>⚙️ Perfil:</b> ${props.perfil}</span><br>
-                                            <span style="color:#e53e3e;"><b>⏱️ Tempo:</b> ${props.time_band} min</span><br>
-                                            <span style="color:#38a169;"><b>💠 Tipo:</b> ${props.tipo}</span>
-                                        </div>`;
-                                    } else if (props.categoria) {
-                                        innerHTML += `<div style="margin-bottom:6px; border-bottom:1px solid #e2e8f0; padding-bottom:4px;">
-                                            <span style="color:#d69e2e;"><b>📍 POI (Equipamento):</b></span><br>
-                                            <b>Tipo:</b> ${props.categoria.toUpperCase()}
-                                        </div>`;
-                                    } else if (props.class || props.classe || props.nome || props.label) {
-                                        const c = props.class || props.classe || props.nome || props.label;
-                                        innerHTML += `<div style="margin-bottom:6px; border-bottom:1px solid #e2e8f0; padding-bottom:4px;">
-                                            <span style="color:#805ad5;"><b>🎯 Amostra / Vetor:</b></span><br>
-                                            <b>Classe:</b> ${c.toUpperCase()}
-                                        </div>`;
-                                    } else {
-                                        let propStr = '';
-                                        for (let key in props) {
-                                            if (key !== 'id' && key !== 'fid') { propStr += `<b>${key}:</b> ${props[key]}<br>`; }
-                                        }
-                                        if(propStr) {
-                                            innerHTML += `<div style="margin-bottom:6px; border-bottom:1px solid #e2e8f0; padding-bottom:4px;">
-                                                <span style="color:#4a5568;"><b>Dados da Camada:</b></span><br>${propStr}
-                                            </div>`;
-                                        }
-                                    }
-                                });
+                    const toggleInfoMode =
+                    wrap.querySelector(
+                        "#toggleInfoMode",
+                    ) as HTMLInputElement;
 
-                                if (innerHTML === '') {
-                                    tooltip!.innerHTML = `<span style="color:#718096; font-style:italic;">(Nenhum dado vetorial detectado aqui. Para Rasters, leia a Legenda Dinâmica na Caixa 7)</span>`;
-                                } else {
-                                    tooltip!.innerHTML = innerHTML;
-                                }
-                                mapObj.getCanvas().style.cursor = 'crosshair';
-                            } else {
-                                tooltip!.style.display = 'none';
-                                mapObj.getCanvas().style.cursor = 'help';
+                    const onStyleImageMissing = (
+                    event: any,
+                    ): void => {
+                    if (
+                        !mapObj
+                        || mapObj.hasImage?.(event.id)
+                    ) {
+                        return;
+                    }
+
+                    const canvas =
+                        document.createElement("canvas");
+
+                    canvas.width = 1;
+                    canvas.height = 1;
+
+                    const context =
+                        canvas.getContext("2d");
+
+                    if (!context) {
+                        return;
+                    }
+
+                    try {
+                        mapObj.addImage(
+                        event.id,
+                        context.getImageData(
+                            0,
+                            0,
+                            1,
+                            1,
+                        ),
+                        );
+                    } catch (error) {
+                        console.debug(
+                        "Não foi possível registrar imagem ausente.",
+                        event.id,
+                        error,
+                        );
+                    }
+                    };
+
+                    const hideIdentifyTooltip = (): void => {
+                    if (tooltip) {
+                        tooltip.style.display = "none";
+                        tooltip.innerHTML = "";
+                    }
+
+                    if (mapObj?.getCanvas()) {
+                        mapObj.getCanvas().style.cursor =
+                        isInfoMode ? "help" : "";
+                    }
+                    };
+
+                    const onIdentifyMouseMove = (
+                    event: any,
+                    ): void => {
+                    if (
+                        !isInfoMode
+                        || !mapObj
+                        || !tooltip
+                    ) {
+                        return;
+                    }
+
+                    let renderedFeatures: any[] = [];
+
+                    try {
+                        renderedFeatures =
+                        mapObj.queryRenderedFeatures(
+                            event.point,
+                        ) ?? [];
+                    } catch (error) {
+                        console.warn(
+                        "Não foi possível identificar feições.",
+                        error,
+                        );
+
+                        hideIdentifyTooltip();
+                        return;
+                    }
+
+                    const seen =
+                        new Set<string>();
+
+                    const identifiedFeatures =
+                        renderedFeatures
+                        .filter(isIdentifiableFeature)
+                        .filter((feature: any) => {
+                            const key =
+                            getFeatureKey(feature);
+
+                            if (seen.has(key)) {
+                            return false;
                             }
-                        });
-                        
-                        mapObj.on('mouseout', () => { tooltip!.style.display = 'none'; });
+
+                            seen.add(key);
+                            return true;
+                        })
+                        .slice(
+                            0,
+                            MAX_IDENTIFIED_FEATURES,
+                        );
+
+                    if (
+                        identifiedFeatures.length === 0
+                    ) {
+                        hideIdentifyTooltip();
+                        return;
                     }
 
-                    (wrap.querySelector("#toggleInfoMode") as HTMLInputElement).addEventListener("change", (e: any) => {
-                        isInfoMode = e.target.checked;
-                        if (!isInfoMode && tooltip) { tooltip.style.display = 'none'; }
-                        if(mapObj && mapObj.getCanvas()) { mapObj.getCanvas().style.cursor = isInfoMode ? 'help' : ''; }
-                    });
+                    tooltip.innerHTML =
+                        buildFeatureTooltipHtml(
+                        identifiedFeatures,
+                        );
+
+                    const originalEvent =
+                        event.originalEvent;
+
+                    const clientX =
+                        originalEvent?.clientX
+                        ?? originalEvent
+                        ?.touches?.[0]?.clientX
+                        ?? 0;
+
+                    const clientY =
+                        originalEvent?.clientY
+                        ?? originalEvent
+                        ?.touches?.[0]?.clientY
+                        ?? 0;
+
+                    const offset = 16;
+                    const margin = 12;
+
+                    tooltip.style.display = "block";
+
+                    const tooltipRect =
+                        tooltip.getBoundingClientRect();
+
+                    let left =
+                        clientX + offset;
+
+                    let top =
+                        clientY + offset;
+
+                    if (
+                        left + tooltipRect.width
+                        > window.innerWidth - margin
+                    ) {
+                        left =
+                        clientX
+                        - tooltipRect.width
+                        - offset;
+                    }
+
+                    if (
+                        top + tooltipRect.height
+                        > window.innerHeight - margin
+                    ) {
+                        top =
+                        window.innerHeight
+                        - tooltipRect.height
+                        - margin;
+                    }
+
+                    tooltip.style.left =
+                        `${Math.max(margin, left)}px`;
+
+                    tooltip.style.top =
+                        `${Math.max(margin, top)}px`;
+
+                    mapObj
+                        .getCanvas()
+                        .style.cursor = "crosshair";
+                    };
+
+                    const onIdentifyMouseOut = (): void => {
+                    hideIdentifyTooltip();
+                    };
+
+                    const onToggleInfoChange = (
+                    event: Event,
+                    ): void => {
+                    const checkbox = event.currentTarget as HTMLInputElement;
+                    isInfoMode = checkbox.checked;
+
+                    if (!isInfoMode) {
+                        hideIdentifyTooltip();
+                    }
+
+                    if (mapObj?.getCanvas()) {
+                        mapObj.getCanvas().style.cursor =
+                        isInfoMode ? "help" : "";
+                    }
+                    };
+
+                    cleanupIdentifyHandlers?.();
+
+                    mapObj?.on(
+                    "styleimagemissing",
+                    onStyleImageMissing,
+                    );
+
+                    mapObj?.on(
+                    "mousemove",
+                    onIdentifyMouseMove,
+                    );
+
+                    mapObj?.on(
+                    "mouseout",
+                    onIdentifyMouseOut,
+                    );
+
+                    toggleInfoMode.addEventListener(
+                    "change",
+                    onToggleInfoChange,
+                    );
+
+                    cleanupIdentifyHandlers = (): void => {
+                    try {
+                        mapObj?.off(
+                        "styleimagemissing",
+                        onStyleImageMissing,
+                        );
+
+                        mapObj?.off(
+                        "mousemove",
+                        onIdentifyMouseMove,
+                        );
+
+                        mapObj?.off(
+                        "mouseout",
+                        onIdentifyMouseOut,
+                        );
+
+                        toggleInfoMode.removeEventListener(
+                        "change",
+                        onToggleInfoChange,
+                        );
+                    } catch (error) {
+                        console.debug(
+                        "Falha não crítica ao remover handlers.",
+                        error,
+                        );
+                    }
+
+                    isInfoMode = false;
+                    hideIdentifyTooltip();
+
+                    cleanupIdentifyHandlers = null;
+                    };
 
                     let moveSyncHandler: any = null;
                     let onMouseMoveSwipe: any = null;
@@ -1835,13 +2255,23 @@ export const plugin = {
                         finally { btnSimular.innerText = "Executar Simulação Urbana"; btnSimular.disabled = false; }
                     });
 
-                    return () => wrap.remove();
+                    return () => {
+                        cleanupIdentifyHandlers?.();
+
+                        const existingTooltip =
+                            document.getElementById("smart15-tooltip");
+
+                        existingTooltip?.remove();
+
+                        wrap.remove();
+                        };
                 }
             });
             app.openRightPanel?.("smart15-workbench");
 		}
     },
     deactivate(app: any) {
+        cleanupIdentifyHandlers?.();
         const mapObj = getMapInstance(app);
         if (mapObj) {
             layersAtivos.forEach((id) => {
