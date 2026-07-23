@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { openPrintableReport } from "../report/report.generator";
-import { ReportData } from "../report/report.types";
+import { openPrintableReport } from "../report.generator";
+import { ReportData } from "../report.types";
 
 interface ReportButtonProps {
   reportData: ReportData | null;
