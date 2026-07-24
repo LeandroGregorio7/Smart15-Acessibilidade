@@ -118,6 +118,13 @@ const painelHtml = `
           <p><b>4. Recorte Visual (Máscara):</b> Na Caixa 7, ative "✂️ Isolar Município" para esconder o entorno e focar apenas na sua geometria de estudo.</p>
           <p><b>5. Consultar Dados (Popups):</b> Ligue a caixa " ATIVAR IDENTIFICADOR (i)". Passe o rato sobre qualquer geometria para ver os dados de Tempo, Perfil, Categorias de Equipamentos OSM e Classificações da IA. Para ler valores exatos de Satélite (Calor/Relevo), use a <b>Legenda Dinâmica Exata</b> na secção 7.</p>
           <p><b>6. Cortina Comparativa (Swipe):</b> Ao ativar a cortina, a tela é dividida. Para comparar, oculte camadas no painel (ícone de olho). O lado <b>Esquerdo</b> ficará congelado com o cenário anterior, e o <b>Direito</b> refletirá suas mudanças.</p>
+          <p><b>7. Exportar Relatório:</b> Clique no botão "Exportar Relatório" para gerar um PDF com o mapa, gráficos e dados do estudo.</p>
+          <p><b>8. Exportar Dados:</b> Clique no botão "Exportar Dados" para baixar os dados em formato GeoJSON, CSV ou Shapefile.</p>
+          <p> 
+          <b>9. A IA e as Amostras (Desenhar ou Subir GeoJSON):</b><br>
+            • <b>Desenhar na tela:</b> Mude o mapa de fundo para <i>Satélite</i> na Caixa 2, escolha a classe e desenhe sobre o mapa (botão DIREITO fecha o polígono).<br>
+            • <b>Subir GeoJSON externo:</b> A tabela de atributos do seu arquivo <u>OBRIGATORIAMENTE</u> deve ter a coluna <code>classe</code> preenchida apenas com os <b>números de 1 a 6</b> (1-Asfalto, 2-Calçada, 3-Construção, 4-Árvore, 5-Grama, 6-Terra). Se quiser colocar o nome por extenso, crie uma coluna separada chamada <code>descritor</code>.
+          </p>
       </div>
       <button id="btnCloseInstrucoes" style="padding: 10px 15px; background: #e53e3e; color: white; border: none; border-radius: 4px; cursor: pointer; float: right; margin-top: 10px; font-weight: bold;">Fechar Instruções</button>
     </div>
@@ -1890,18 +1897,40 @@ export const plugin = {
                                         }
 
                                         const rawClass =
-                                            feature.properties?.classe ??
-                                            feature.properties?.class;
-                                        const classe = Number(rawClass);
-                                        const classeNome =
-                                            SAMPLE_CLASSES[classe] ??
-                                            feature.properties?.classe_nome;
+                                        feature.properties?.classe
+                                        ?? feature.properties?.class;
 
-                                        if (!Number.isInteger(classe) || !SAMPLE_CLASSES[classe]) {
-                                            throw new Error(
-                                                `A feição ${index + 1} possui classe inválida.`
-                                            );
+                                        const normalizeClassName = (value: unknown): string =>
+                                        String(value ?? "")
+                                            .trim()
+                                            .normalize("NFD")
+                                            .replace(/\p{Diacritic}/gu, "")
+                                            .toLowerCase();
+
+                                        const numericClass = Number(rawClass);
+
+                                        const classEntry = Object.entries(SAMPLE_CLASSES)
+                                        .find(([, className]) =>
+                                            normalizeClassName(className)
+                                            === normalizeClassName(rawClass),
+                                        );
+
+                                        const classe = Number.isInteger(numericClass)
+                                        ? numericClass
+                                        : Number(classEntry?.[0]);
+
+                                        if (
+                                        !Number.isInteger(classe)
+                                        || SAMPLE_CLASSES[classe] === undefined
+                                        ) {
+                                        throw new Error(
+                                            `A feição ${index + 1} possui classe inválida: ${String(rawClass)}.`,
+                                        );
                                         }
+
+                                        const classeNome =
+                                        SAMPLE_CLASSES[classe]
+                                        ?? feature.properties?.classe_nome;
 
                                         return {
                                             type: "Feature",
@@ -2001,7 +2030,7 @@ export const plugin = {
 
                     btnGenerateReport.addEventListener(
                       "click",
-                      () => {
+                      async () => {
                         if (!ultimoResultadoSimulacao) {
                           alert(
                             "Execute uma simulação antes de gerar o relatório."
@@ -2043,7 +2072,7 @@ export const plugin = {
                           }
 
                           const reportData =
-                            adaptSimulationToReport({
+                            await adaptSimulationToReport({
                               simulation: ultimoResultadoSimulacao,
                               configuration:
                                 ultimaConfiguracaoSimulacao,
@@ -2051,6 +2080,27 @@ export const plugin = {
                               studyGeometry:
                                 geometriaGeoJSON,
                             });
+
+                            console.group(
+                            "Smart15 — dados adaptados para impressão",
+                            );
+
+                            console.log(
+                            "Simulation:",
+                            ultimoResultadoSimulacao,
+                            );
+
+                            console.log(
+                            "Configuration:",
+                            ultimaConfiguracaoSimulacao,
+                            );
+
+                            console.log(
+                            "ReportData final:",
+                            reportData,
+                            );
+
+                            console.groupEnd();
 
                           openPrintableReport(reportData);
                         } catch (error) {
@@ -2113,7 +2163,16 @@ export const plugin = {
                                 visualizacao: { extrusao_3d: (wrap.querySelector("#extrusao3d") as HTMLInputElement).checked },
                                 modo_temp: (wrap.querySelector("#modoTemp") as HTMLSelectElement).value,
                                 modo_veg: (wrap.querySelector("#modoVeg") as HTMLSelectElement).value,
-                                modo_dem: (wrap.querySelector("#modoDem") as HTMLSelectElement).value
+                                modo_dem: (wrap.querySelector("#modoDem") as HTMLSelectElement).value,
+                                pluginVersion: "2.0.0",
+                                tempo_alvo: 15,
+
+                                dataSources: [
+                                    "OpenStreetMap",
+                                    "Copernicus DEM",
+                                    "Sentinel-2",
+                                    "Planetary Computer",
+                                ],
                             };
 
                             const formData = new FormData(); formData.append("dados", JSON.stringify(pData));
@@ -2160,10 +2219,31 @@ export const plugin = {
                             ultimoResultadoSimulacao = res.data;
                             ultimaConfiguracaoSimulacao = pData;
 
-                            console.log(
-                              "Relatório retornado pelo backend:",
-                              res.data.report,
+                            console.group(
+                            "Smart15 — diagnóstico do relatório",
                             );
+
+                            console.log(
+                            "Configuração enviada:",
+                            pData,
+                            );
+
+                            console.log(
+                            "Resposta completa:",
+                            res.data,
+                            );
+
+                            console.log(
+                            "Report retornado pelo backend:",
+                            res.data.report,
+                            );
+
+                            console.log(
+                            "Simulações retornadas:",
+                            res.data.simulacoes,
+                            );
+
+                            console.groupEnd();
 
                             btnGenerateReport.style.display =
                               res.data.report

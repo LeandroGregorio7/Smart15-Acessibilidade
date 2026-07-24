@@ -1,3 +1,8 @@
+import {
+  getExtentFromGeoJson,
+  resolveAdministrativeLocation,
+} from "./report.geocoding";
+
 export interface SimulationReportAdapterInput {
   simulation: any;
   configuration?: any;
@@ -51,15 +56,47 @@ function stringArray(value: unknown): string[] {
 
 function destinationLabel(value: string): string {
   const labels: Record<string, string> = {
-    escolas: "Escolas",
-    hospitais: "Hospitais",
-    parques: "Parques",
+    escolas: "Escolas e creches",
+    hospitais: "Hospitais e clínicas",
+    parques: "Parques e áreas verdes",
+    mercados: "Mercados e padarias",
+    cultura: "Equipamentos culturais",
+    comercio: "Comércio e serviços",
+    academias: "Academias e equipamentos esportivos",
     saude: "Unidades de saúde",
     educacao: "Equipamentos de educação",
     lazer: "Equipamentos de lazer",
   };
 
-  return labels[value] ?? value.replace(/_/g, " ");
+  return labels[value]
+    ?? value
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (letter) =>
+        letter.toUpperCase()
+      );
+}
+
+function profileLabel(value: string): string {
+  const labels: Record<string, string> = {
+    adulto_pedestre: "Adulto — a pé",
+    crianca_pedestre: "Criança — a pé",
+    idoso_pedestre: "Pessoa idosa — a pé",
+
+    adulto_bike: "Adulto — bicicleta",
+    crianca_bike: "Criança — bicicleta",
+    idoso_bike: "Pessoa idosa — bicicleta",
+
+    adulto_bicicleta: "Adulto — bicicleta",
+    crianca_bicicleta: "Criança — bicicleta",
+    idoso_bicicleta: "Pessoa idosa — bicicleta",
+  };
+
+  return labels[value]
+    ?? value
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (letter) =>
+        letter.toUpperCase()
+      );
 }
 
 function resolveTargetTimeMinutes(configuration: any): number {
@@ -72,14 +109,39 @@ function resolveTargetTimeMinutes(configuration: any): number {
   );
 }
 
-export function adaptSimulationToReport(
+export async function adaptSimulationToReport(
   input: SimulationReportAdapterInput,
-): any {
+): Promise<any> {
   const simulation = input.simulation ?? {};
   const backendReport = simulation.report ?? simulation ?? {};
   const rasters = backendReport.rasters ?? {};
   const backendParameters = backendReport.parametros ?? {};
   const frontendConfiguration = input.configuration ?? {};
+
+
+
+  const selectedProfiles = stringArray(
+      frontendConfiguration.selectedProfiles
+        ?? frontendConfiguration.perfis
+        ?? backendParameters.perfis_selecionados
+        ?? backendReport.perfis_selecionados,
+    );
+
+    const selectedProfileLabels =
+      selectedProfiles.map(profileLabel);
+
+    const selectedDestinations = stringArray(
+      frontendConfiguration.selectedDestinations
+        ?? frontendConfiguration.alvos
+        ?? backendParameters.destinos_selecionados
+        ?? backendReport.destinos_selecionados,
+    );
+
+    const outputFormats = stringArray(
+      frontendConfiguration.outputFormats
+        ?? frontendConfiguration.formatos
+        ?? backendParameters.formatos_processados,
+    );
 
   const area = backendReport.area ?? {};
   const pois = backendReport.pois ?? { total: 0, por_categoria: {} };
@@ -92,76 +154,96 @@ export function adaptSimulationToReport(
   const vegetation = rasters.vegetacao ?? {};
   const elevation = rasters.elevacao ?? {};
 
-  const selectedProfiles = stringArray(
-    frontendConfiguration.selectedProfiles
-      ?? backendParameters.perfis_selecionados,
-  );
-
-  const selectedDestinations = stringArray(
-    frontendConfiguration.selectedDestinations
-      ?? backendParameters.destinos_selecionados,
-  );
-
-  const outputFormats = stringArray(
-    frontendConfiguration.outputFormats
-      ?? backendParameters.formatos_processados,
-  );
-
   const targetTimeMinutes = resolveTargetTimeMinutes({
     ...backendParameters,
     ...frontendConfiguration,
   });
+  const primaryProfile =  profiles.length > 0 ? profiles[0] : null;
 
   const baseWalkingSpeedKmH = positiveNumberOrDefault(
     frontendConfiguration.baseWalkingSpeedKmH
       ?? frontendConfiguration.velocidadeBaseKmH
       ?? frontendConfiguration.velocidade_base_kmh
-      ?? backendParameters.velocidade_base_kmh,
+      ?? backendParameters.velocidade_base_kmh
+      ?? primaryProfile?.velocidade_base_kmh,
     5,
   );
 
-  const distanceMeters = numberOrZero(
+  const distanceMeters = numberOrNull(
     simulation.distanceMeters
+      ?? simulation.distancia_rede_m
       ?? simulation.distancia_m
       ?? backendReport.distanceMeters
+      ?? backendReport.distancia_rede_m
       ?? backendReport.distancia_m
-      ?? profiles[0]?.distancia_m
-      ?? profiles[0]?.distanceMeters,
+      ?? primaryProfile?.distancia_rede_m
+      ?? primaryProfile?.distancia_m
+      ?? primaryProfile?.distanceMeters,
   );
 
-  const calculatedBaseTimeMinutes = distanceMeters > 0
-    ? (distanceMeters / 1000 / baseWalkingSpeedKmH) * 60
-    : 0;
+  const calculatedBaseTimeMinutes =
+    distanceMeters !== null
+    && distanceMeters > 0
+    && baseWalkingSpeedKmH > 0
+      ? (
+          distanceMeters
+          / 1000
+          / baseWalkingSpeedKmH
+        ) * 60
+      : null;
 
-  const baseTimeMinutes = numberOrNull(
-    simulation.baseTimeMinutes
-      ?? simulation.tempo_base_minutos
-      ?? backendReport.baseTimeMinutes
-      ?? backendReport.tempo_base_minutos
-      ?? profiles[0]?.tempo_base_minutos,
-  ) ?? calculatedBaseTimeMinutes;
+  const baseTimeMinutes =
+    numberOrNull(
+      simulation.baseTimeMinutes
+        ?? simulation.tempo_base_minutos
+        ?? backendReport.baseTimeMinutes
+        ?? backendReport.tempo_base_minutos
+        ?? primaryProfile?.tempo_base_minutos,
+    )
+    ?? calculatedBaseTimeMinutes;
 
-  const adjustedTimeMinutes = numberOrNull(
-    simulation.adjustedTimeMinutes
-      ?? simulation.tempo_ajustado_minutos
-      ?? backendReport.adjustedTimeMinutes
-      ?? backendReport.tempo_ajustado_minutos
-      ?? profiles[0]?.tempo_ajustado_minutos
-      ?? profiles[0]?.tempo_minutos,
-  ) ?? baseTimeMinutes;
+  const adjustedTimeMinutes =
+    numberOrNull(
+      simulation.adjustedTimeMinutes
+        ?? simulation.tempo_ajustado_minutos
+        ?? backendReport.adjustedTimeMinutes
+        ?? backendReport.tempo_ajustado_minutos
+        ?? primaryProfile?.tempo_ajustado_minutos
+        ?? primaryProfile?.tempo_minutos,
+    )
+    ?? baseTimeMinutes;
 
-  const averageSpeedKmH = adjustedTimeMinutes > 0 && distanceMeters > 0
-    ? (distanceMeters / 1000) / (adjustedTimeMinutes / 60)
-    : baseWalkingSpeedKmH;
+  const averageSpeedKmH =
+    adjustedTimeMinutes !== null
+    && adjustedTimeMinutes > 0
+    && distanceMeters !== null
+    && distanceMeters > 0
+      ? (
+          distanceMeters / 1000
+        ) / (
+          adjustedTimeMinutes / 60
+        )
+      : null;
 
-  const primaryDestination = selectedDestinations[0];
+  const destinationLabels =
+  selectedDestinations.map(destinationLabel);
+
+  const destinationsSummary =
+    destinationLabels.length > 0
+      ? destinationLabels.join(", ")
+      : undefined;
+
+  const destinationTypesSummary =
+    selectedDestinations.length > 0
+      ? selectedDestinations.join(", ")
+      : undefined;
+
   const destinationName = firstNonEmptyString(
     frontendConfiguration.destinationName,
     frontendConfiguration.nomeDestino,
     simulation.destinationName,
     simulation.nome_destino,
-    primaryDestination ? destinationLabel(primaryDestination) : undefined,
-    selectedDestinations.length > 1 ? "Destinos selecionados" : undefined,
+    destinationsSummary,
     "Área de estudo",
   )!;
 
@@ -170,8 +252,7 @@ export function adaptSimulationToReport(
     frontendConfiguration.tipoDestino,
     simulation.destinationType,
     simulation.tipo_destino,
-    primaryDestination,
-    selectedDestinations.length > 1 ? "múltiplas categorias" : undefined,
+    destinationTypesSummary,
     "não informado",
   )!;
 
@@ -179,11 +260,12 @@ export function adaptSimulationToReport(
     area.area_m2 ?? area.areaSquareMeters,
   );
 
-  const reachableAreaSquareMeters = numberOrNull(
-    backendReport.reachableAreaSquareMeters
-      ?? backendReport.area_alcancavel_m2
-      ?? area.area_alcancavel_m2,
-  ) ?? areaSquareMeters;
+  const reachableAreaSquareMeters =
+    numberOrNull(
+      backendReport.reachableAreaSquareMeters
+        ?? backendReport.area_alcancavel_m2
+        ?? area.area_alcancavel_m2,
+    );
 
   const temperatureAverageCelsius = kelvinToCelsius(
     temperature.media ?? temperature.media_aproximada,
@@ -231,6 +313,38 @@ export function adaptSimulationToReport(
     backendReport.generatedAt,
   ) ?? new Date().toISOString();
 
+  const municipalityFromData = firstNonEmptyString(
+    frontendConfiguration.municipality,
+    frontendConfiguration.municipio,
+    simulation.municipality,
+    simulation.municipio,
+  );
+
+  const stateFromData = firstNonEmptyString(
+    frontendConfiguration.state,
+    frontendConfiguration.uf,
+    simulation.state,
+    simulation.uf,
+  );
+
+  const extent =
+    !municipalityFromData || !stateFromData
+      ? getExtentFromGeoJson(input.studyGeometry)
+      : undefined;
+
+  const administrativeLocation = extent
+    ? await resolveAdministrativeLocation(extent)
+    : {};
+
+  const municipality =
+    municipalityFromData
+    ?? administrativeLocation.municipality;
+
+  const state =
+    stateFromData
+    ?? administrativeLocation.state;
+
+
   return {
     identification: {
       analysisId: String(
@@ -249,18 +363,8 @@ export function adaptSimulationToReport(
       ),
       destinationName,
       destinationType,
-      municipality: firstNonEmptyString(
-        frontendConfiguration.municipality,
-        frontendConfiguration.municipio,
-        simulation.municipality,
-        simulation.municipio,
-      ),
-      state: firstNonEmptyString(
-        frontendConfiguration.state,
-        frontendConfiguration.uf,
-        simulation.state,
-        simulation.uf,
-      ),
+      municipality,
+      state,
       coordinateReferenceSystem: firstNonEmptyString(
         area.crs_metrico,
         area.crs,
@@ -283,7 +387,9 @@ export function adaptSimulationToReport(
       baseWalkingSpeedKmH,
       weights,
       selectedProfiles,
+      selectedProfileLabels,
       selectedDestinations,
+      selectedDestinationLabels: destinationLabels,
       outputFormats,
     },
 

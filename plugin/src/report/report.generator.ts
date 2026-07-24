@@ -1,4 +1,4 @@
-import { analyzeFactors } from "./report.rules";
+import { analyzeFactors, buildExecutiveSummary} from "./report.rules";
 import { REPORT_CSS } from "./report.css";
 import { FactorImpact, ReportData } from "./report.types";
 import {
@@ -9,6 +9,7 @@ import {
   formatNumber,
   uniqueStrings,
 } from "./report.utils";
+
 
 const LEVEL_LABELS: Record<FactorImpact["level"], string> = {
   positive: "Favorável",
@@ -26,6 +27,47 @@ function renderMetric(label: string, value: string): string {
       <span class="metric-value">${escapeHtml(value)}</span>
     </div>
   `;
+}
+
+function isFiniteNumber(
+  value: unknown,
+): value is number {
+  return (
+    typeof value === "number"
+    && Number.isFinite(value)
+  );
+}
+
+function formatOptionalDistance(
+  value: number | null | undefined,
+): string {
+  return isFiniteNumber(value)
+    ? formatDistance(value)
+    : "Não disponível";
+}
+
+function formatOptionalMinutes(
+  value: number | null | undefined,
+): string {
+  return isFiniteNumber(value)
+    ? `${formatNumber(value, 2)} min`
+    : "Não disponível";
+}
+
+function formatOptionalSpeed(
+  value: number | null | undefined,
+): string {
+  return isFiniteNumber(value)
+    ? `${formatNumber(value, 2)} km/h`
+    : "Não disponível";
+}
+
+function formatOptionalArea(
+  value: number | null | undefined,
+): string {
+  return isFiniteNumber(value)
+    ? formatArea(value)
+    : "Não disponível";
 }
 
 function renderFactor(factor: FactorImpact): string {
@@ -106,35 +148,169 @@ function buildSummary(
   report: ReportData,
   factors: FactorImpact[],
 ): string {
-  const { indicators, configuration } = report;
+  const { indicators, configuration } =
+    report;
 
-  const withinTarget =
-    indicators.adjustedTimeMinutes <= configuration.targetTimeMinutes;
+  const adjustedTime =
+    indicators.adjustedTimeMinutes;
 
-  const restrictiveFactors = factors
-    .filter(
-      (factor) =>
-        factor.level === "high" ||
-        factor.level === "critical",
-    )
-    .map((factor) => factor.label);
+  const restrictiveFactors =
+    factors
+      .filter(
+        (factor) =>
+          factor.level === "high"
+          || factor.level === "critical",
+      )
+      .map(
+        (factor) => factor.label,
+      );
 
-  let summary = withinTarget
-    ? `O destino encontra-se dentro do limite de ` +
-      `${formatNumber(configuration.targetTimeMinutes)} minutos definido para a análise.`
-    : `O tempo ajustado ultrapassa o limite de ` +
-      `${formatNumber(configuration.targetTimeMinutes)} minutos definido para a análise.`;
+  let summary: string;
+
+  if (isFiniteNumber(adjustedTime)) {
+    const withinTarget =
+      adjustedTime
+      <= configuration.targetTimeMinutes;
+
+    summary = withinTarget
+      ? `O resultado encontra-se dentro do limite de `
+        + `${formatNumber(
+          configuration.targetTimeMinutes,
+        )} minutos definido para a análise.`
+      : `O tempo ajustado ultrapassa o limite de `
+        + `${formatNumber(
+          configuration.targetTimeMinutes,
+        )} minutos definido para a análise.`;
+  } else {
+    summary =
+      "Não foi possível determinar o tempo ajustado "
+      + "com os dados atualmente disponibilizados.";
+  }
 
   if (restrictiveFactors.length > 0) {
     summary +=
-      ` Os fatores com maior nível de restrição foram: ` +
-      `${restrictiveFactors.join(", ")}.`;
+      " Os fatores com maior nível de restrição foram: "
+      + `${restrictiveFactors.join(", ")}.`;
   } else {
     summary +=
-      " Não foram identificados fatores classificados com influência elevada ou crítica.";
+      " Não foram identificados fatores classificados "
+      + "com influência elevada ou crítica.";
   }
 
   return summary;
+}
+
+function getSelectedProfiles(
+  report: ReportData,
+): string[] {
+  const labels =
+    report.configuration
+      ?.selectedProfileLabels;
+
+  if (Array.isArray(labels)) {
+    return labels.filter(
+      (item): item is string =>
+        typeof item === "string"
+        && Boolean(item.trim()),
+    );
+  }
+
+  const codes =
+    report.configuration
+      ?.selectedProfiles;
+
+  return Array.isArray(codes)
+    ? codes.filter(
+        (item): item is string =>
+          typeof item === "string"
+          && Boolean(item.trim()),
+      )
+    : [];
+}
+
+function getProfileCodes(
+  report: ReportData,
+): string[] {
+  const profiles =
+    report.configuration
+      ?.selectedProfiles;
+
+  return Array.isArray(profiles)
+    ? profiles.map(String)
+    : [];
+}
+
+function getMobilityContext(
+  report: ReportData,
+): {
+  title: string;
+  shortLabel: string;
+  movementDescription: string;
+  speedLabel: string;
+  footerLabel: string;
+} {
+  const profiles =
+    getProfileCodes(report)
+      .map((profile) =>
+        profile.toLowerCase(),
+      );
+
+  const hasBike =
+    profiles.some(
+      (profile) =>
+        profile.includes("bike")
+        || profile.includes("bicicleta"),
+    );
+
+  const hasPedestrian =
+    profiles.some(
+      (profile) =>
+        profile.includes("pedestre")
+        || profile.includes("pe"),
+    );
+
+  if (hasBike && hasPedestrian) {
+    return {
+      title:
+        "Relatório de Análise de Acessibilidade Urbana",
+      shortLabel:
+        "Acessibilidade Urbana",
+      movementDescription:
+        "deslocamentos a pé e por bicicleta",
+      speedLabel:
+        "Velocidade-base de referência",
+      footerLabel:
+        "acessibilidade urbana",
+    };
+  }
+
+  if (hasBike) {
+    return {
+      title:
+        "Relatório de Análise de Acessibilidade Cicloviária",
+      shortLabel:
+        "Acessibilidade Cicloviária",
+      movementDescription:
+        "deslocamentos por bicicleta",
+      speedLabel:
+        "Velocidade-base de ciclismo",
+      footerLabel:
+        "acessibilidade cicloviária",
+    };
+  }
+
+  return {
+    title:
+      "Relatório de Análise de Caminhabilidade",
+    shortLabel:
+      "Caminhabilidade",
+    movementDescription:
+      "deslocamentos a pé",
+    speedLabel:
+      "Velocidade-base de caminhada",
+    footerLabel:
+      "caminhabilidade",
+  };
 }
 
 export function generateReportHtml(report: ReportData): string {
@@ -166,12 +342,38 @@ export function generateReportHtml(report: ReportData): string {
 
   const factors = analyzeFactors(report);
 
+  const executiveSummary =  buildExecutiveSummary(report, factors);
+
+  const restrictiveFactorsText =
+  executiveSummary.restrictiveFactors.length > 0
+    ? executiveSummary.restrictiveFactors.join(", ")
+    : "Não foram identificados fatores prioritários.";
+
+  const mobility =
+  getMobilityContext(report);
+
+  const selectedProfiles =
+    getSelectedProfiles(report);
+
+  const profilesText =
+    selectedProfiles.length > 0
+      ? selectedProfiles.join(", ")
+      : "Não informado";
+
   const recommendations = uniqueStrings(
     factors.flatMap((factor) => factor.recommendations),
   );
 
   const adjustedDifference =
-    indicators.adjustedTimeMinutes - indicators.baseTimeMinutes;
+    isFiniteNumber(
+      indicators.adjustedTimeMinutes,
+    )
+    && isFiniteNumber(
+      indicators.baseTimeMinutes,
+    )
+      ? indicators.adjustedTimeMinutes
+        - indicators.baseTimeMinutes
+      : null;
 
   const summary = buildSummary(report, factors);
 
@@ -191,8 +393,11 @@ export function generateReportHtml(report: ReportData): string {
           content="width=device-width, initial-scale=1"
         >
         <title>
-          Relatório de Caminhabilidade -
-          ${escapeHtml(identification.destinationName ?? "Destino não informado")}
+          ${escapeHtml(mobility.shortLabel)} -
+          ${escapeHtml(
+            identification.destinationName
+            ?? "Destino não informado",
+          )}
         </title>
 
         <style>${REPORT_CSS}</style>
@@ -211,7 +416,7 @@ export function generateReportHtml(report: ReportData): string {
         </div>
         <main class="report">
           <header class="report-header">
-            <h1>Relatório de Análise de Caminhabilidade</h1>
+           <h1>${escapeHtml(mobility.title)}</h1>
 
             <p>
               <strong>Área:</strong>
@@ -230,9 +435,42 @@ export function generateReportHtml(report: ReportData): string {
             </p>
           </header>
 
-          <section>
-            <h2>1. Identificação e caracterização da área</h2>
+          <section class="executive-summary">
+            <h2>1. Sumário executivo</h2>
 
+            <p>
+              <strong>Situação:</strong>
+              ${escapeHtml(executiveSummary.status)}
+            </p>
+
+            <p>
+              <strong>Prioridade:</strong>
+              ${escapeHtml(executiveSummary.priority)}
+            </p>
+
+            <p>
+              <strong>Conclusão:</strong>
+              ${escapeHtml(executiveSummary.headline)}
+            </p>
+
+            <p>
+              <strong>Análise:</strong>
+              ${escapeHtml(executiveSummary.detail)}
+            </p>
+
+            <p>
+              <strong>Fatores prioritários:</strong>
+              ${escapeHtml(restrictiveFactorsText)}
+            </p>
+
+            <p>
+              <strong>Diretriz de ação:</strong>
+              ${escapeHtml(executiveSummary.recommendedAction)}
+            </p>
+          </section>
+
+          <section>
+            <h2>2. Identificação e caracterização da área</h2>
             <table>
               <tbody>
                 <tr>
@@ -240,7 +478,7 @@ export function generateReportHtml(report: ReportData): string {
                   <td>${escapeHtml(identification.analysisId ?? "Não informado")}</td>
                 </tr>
                 <tr>
-                  <th>Município/UF</th>
+                  <th>Município/Estado</th>
                   <td>
                     ${escapeHtml(identification.municipality ?? "Não informado")}
                     ${identification.state
@@ -272,17 +510,48 @@ export function generateReportHtml(report: ReportData): string {
             </table>
 
             <p>
-              A análise considera um deslocamento a pé até
-              <strong>${escapeHtml(identification.destinationName ?? "Destino não informado")}</strong>,
-              classificado como
-              <strong>${escapeHtml(identification.destinationType ?? "Não informado")}</strong>.
-              A distância calculada pela rede foi de
-              <strong>${formatDistance(indicators.distanceMeters)}</strong>.
+              A análise considera
+              <strong>
+                ${escapeHtml(
+                  mobility.movementDescription,
+                )}
+              </strong>
+              até
+              <strong>
+                ${escapeHtml(
+                  identification.destinationName
+                  ?? "Destino não informado",
+                )}
+              </strong>,
+              nas categorias
+              <strong>
+                ${escapeHtml(
+                  identification.destinationType
+                  ?? "Não informado",
+                )}
+              </strong>.
+              ${
+                isFiniteNumber(
+                  indicators.distanceMeters,
+                )
+                  ? `
+                    A distância calculada pela rede foi de
+                    <strong>
+                      ${formatDistance(
+                        indicators.distanceMeters,
+                      )}
+                    </strong>.
+                  `
+                  : `
+                    A distância de rede não foi disponibilizada
+                    pelo processamento atual.
+                  `
+              }
             </p>
           </section>
 
           <section>
-            <h2>2. Configuração da simulação</h2>
+            <h2>3. Configuração da simulação</h2>
 
             <table>
               <thead>
@@ -297,19 +566,13 @@ export function generateReportHtml(report: ReportData): string {
                   <td>${formatNumber(configuration.targetTimeMinutes)} min</td>
                 </tr>
                 <tr>
-                  <td>Velocidade-base de caminhada</td>
+                  <td>Perfis de mobilidade</td>
+                  <td>${escapeHtml(profilesText)}</td>
+                </tr>
+                <tr>
+                  <td>${escapeHtml(mobility.speedLabel)}</td>
                   <td>
                     ${formatNumber(configuration.baseWalkingSpeedKmH, 2)} km/h
-                  </td>
-                </tr>
-                <tr>
-                  <td>Peso da declividade</td>
-                  <td>${formatNumber(configuration.weights?.slope ?? 0, 3)}</td>
-                </tr>
-                <tr>
-                  <td>Peso da arborização</td>
-                  <td>
-                    ${formatNumber(configuration.weights?.treeCoverage ?? 0, 3)}
                   </td>
                 </tr>
               </tbody>
@@ -317,46 +580,60 @@ export function generateReportHtml(report: ReportData): string {
           </section>
 
           <section>
-            <h2>3. Resultados da simulação</h2>
+            <h2>4. Resultados da simulação</h2>
 
             <div class="metrics">
               ${renderMetric(
                 "Distância",
-                formatDistance(indicators.distanceMeters),
+                formatOptionalDistance(
+                  indicators.distanceMeters,
+                ),
               )}
 
               ${renderMetric(
                 "Tempo sem ponderação",
-                `${formatNumber(indicators.baseTimeMinutes, 2)} min`,
+                formatOptionalMinutes(
+                  indicators.baseTimeMinutes,
+                ),
               )}
 
               ${renderMetric(
                 "Tempo ajustado",
-                `${formatNumber(indicators.adjustedTimeMinutes, 2)} min`,
+                formatOptionalMinutes(
+                  indicators.adjustedTimeMinutes,
+                ),
               )}
 
               ${renderMetric(
                 "Diferença produzida pelos fatores",
-                `${adjustedDifference >= 0 ? "+" : ""}` +
-                  `${formatNumber(adjustedDifference, 2)} min`,
+                adjustedDifference === null
+                  ? "Não disponível"
+                  : `${adjustedDifference >= 0 ? "+" : ""}`
+                    + `${formatNumber(
+                      adjustedDifference,
+                      2,
+                    )} min`,
               )}
 
               ${renderMetric(
                 "Velocidade média",
-                `${formatNumber(indicators.averageSpeedKmH, 2)} km/h`,
+                formatOptionalSpeed(
+                  indicators.averageSpeedKmH,
+                ),
               )}
 
               ${renderMetric(
                 "Área alcançável",
-                formatArea(indicators.reachableAreaSquareMeters),
+                formatOptionalArea(
+                  indicators.reachableAreaSquareMeters,
+                ),
               )}
             </div>
-
             ${maps}
           </section>
 
           <section>
-            <h2>4. Interpretação técnica</h2>
+            <h2>5. Interpretação técnica</h2>
 
             <p>${escapeHtml(summary)}</p>
 
@@ -364,7 +641,7 @@ export function generateReportHtml(report: ReportData): string {
           </section>
 
           <section>
-            <h2>5. Recomendações para o planejamento urbano</h2>
+            <h2>6. Recomendações para o planejamento urbano</h2>
 
             ${
               recommendations.length === 0
@@ -388,7 +665,7 @@ export function generateReportHtml(report: ReportData): string {
           </section>
 
           <section>
-            <h2>6. Fontes, parâmetros e limitações</h2>
+            <h2>7. Fontes, parâmetros e limitações</h2>
 
             <h3>Fontes dos dados</h3>
 
@@ -422,7 +699,7 @@ export function generateReportHtml(report: ReportData): string {
 
           <footer class="report-footer">
             Relatório produzido automaticamente pelo plugin de análise de
-            caminhabilidade.
+            ${escapeHtml(mobility.footerLabel)}.
 
             Versão do plugin:
             ${escapeHtml(identification.pluginVersion ?? "não informada")}.

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException,Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -10,6 +10,7 @@ import numpy as np
 import osmnx as ox
 import networkx as nx
 import rasterio
+import logging
 from rasterio.enums import Resampling, ColorInterp
 from rasterio.warp import transform_bounds, transform_geom
 from rasterio.mask import mask
@@ -25,10 +26,11 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import warnings
 from pyproj import Transformer
-import logging
 import traceback
 import requests
 import hashlib
+from starlette.datastructures import UploadFile
+from starlette.formparsers import MultiPartException
 from shapely.geometry import (
     Point,
     Polygon,
@@ -41,6 +43,10 @@ import pystac_client
 import planetary_computer
 import stackstac
 import rioxarray
+
+logger = logging.getLogger(__name__)
+
+MAX_PART_SIZE = 250 * 1024 * 1024  # 250 MB
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -145,7 +151,9 @@ def get_raster_visual_stats(
     }
 
     if minimum is not None and maximum is not None:
+
         result["amplitude"] = float(maximum - minimum)
+
         result["media_aproximada"] = float(
             (minimum + maximum) / 2
         )
@@ -322,19 +330,40 @@ def tiff_to_png(
 
             vmin, vmax = 0, 1
             output_path = output_dir / f"{out_name}.png"
+
             if is_rgb and src.count >= 3:
-                img_data = np.transpose(data[:3, :, :], (1, 2, 0)).astype(np.float32)
-                valid_pixels = img_data[img_data > 0]
+                img_data = np.transpose(
+                    data[:3, :, :],
+                    (1, 2, 0),
+                ).astype(np.float32)
+
+                valid_pixels = img_data[
+                    np.isfinite(img_data)
+                    & (img_data > 0)
+                ]
+
                 if valid_pixels.size:
-                    p2, p98 = np.nanpercentile(valid_pixels, [2, 98])
+                    p2, p98 = np.nanpercentile(
+                        valid_pixels,
+                        [2, 98],
+                    )
 
                     if p98 > p2:
-                        img_data = np.clip(img_data, p2, p98)
-                        img_data = (img_data - p2) / (p98 - p2)
-                if p98 > p2:
-                    img_data = np.clip(img_data, p2, p98)
-                    img_data = (img_data - p2) / (p98 - p2)
-                output_path = output_dir / f"{out_name}.png"
+                        img_data = np.clip(
+                            img_data,
+                            p2,
+                            p98,
+                        )
+                        img_data = (
+                            (img_data - p2)
+                            / (p98 - p2)
+                        )
+                else:
+                    img_data = np.zeros_like(
+                        img_data,
+                        dtype=np.float32,
+                    )
+
                 plt.imsave(
                     output_path,
                     img_data,
@@ -423,19 +452,140 @@ def create_hex_grid(poly, res=10):
         except: pass
     return gpd.GeoDataFrame(geometry=hex_polygons, crs="EPSG:4326")
 
-@app.post("/simular")
-async def simular_urbana(
-    dados: str = Form(...),
-    file_veg: UploadFile = File(None),
-    file_temp: UploadFile = File(None),
-    file_dem: UploadFile = File(None),
-    file_limite: UploadFile = File(None),
-    file_samples: UploadFile = File(None),
+def get_optional_upload(form, field_name: str) -> UploadFile | None:
+    value = form.get(field_name)
+
+    if value is None or value == "":
+        return None
+
+    if not isinstance(value, UploadFile):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Campo '{field_name}' não é um arquivo válido.",
+        )
+
+    return value
+
+def calculate_path_metrics(
+    graph,
+    path_nodes,
+    adjusted_time_attribute: str,
+    base_time_attribute: str,
 ):
+    """
+    Calcula comprimento, tempo-base e tempo ajustado
+    de um caminho representado por uma sequência de nós.
+    """
+
+    total_length_m = 0.0
+    total_base_time_min = 0.0
+    total_adjusted_time_min = 0.0
+
+    for source_node, target_node in zip(
+        path_nodes[:-1],
+        path_nodes[1:],
+    ):
+        edge_options = graph.get_edge_data(
+            source_node,
+            target_node,
+        )
+
+        if not edge_options:
+            continue
+
+        # Em um MultiDiGraph podem existir várias arestas
+        # entre o mesmo par de nós. Escolhemos a que possui
+        # menor tempo ajustado.
+        selected_edge = min(
+            edge_options.values(),
+            key=lambda edge: float(
+                edge.get(
+                    adjusted_time_attribute,
+                    float("inf"),
+                )
+            ),
+        )
+
+        total_length_m += float(
+            selected_edge.get("length", 0.0)
+        )
+
+        total_base_time_min += float(
+            selected_edge.get(
+                base_time_attribute,
+                0.0,
+            )
+        )
+
+        total_adjusted_time_min += float(
+            selected_edge.get(
+                adjusted_time_attribute,
+                0.0,
+            )
+        )
+
+    return {
+        "distancia_rede_m": total_length_m,
+        "tempo_base_minutos":
+            total_base_time_min,
+        "tempo_ajustado_minutos":
+            total_adjusted_time_min,
+        "diferenca_minutos":
+            total_adjusted_time_min
+            - total_base_time_min,
+    }
+
+@app.post("/simular")
+async def simular_urbana(request: Request):
     simulation_id = None
     simulation_dir = None
 
+
     try:
+
+        try:
+            form = await request.form(
+                max_files=10,
+                max_fields=100,
+                max_part_size=MAX_PART_SIZE,
+            )
+        except MultiPartException as exc:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    "Um dos arquivos enviados excede o limite permitido "
+                    "de 250 MB."
+                ),
+            ) from exc
+
+        dados = form.get("dados")
+
+        if not isinstance(dados, str):
+            raise HTTPException(
+                status_code=400,
+                detail="Campo 'dados' ausente ou inválido.",
+            )
+
+        # Apenas valida o JSON, mas mantém `dados` como string.
+
+
+
+        try:
+            pacote = json.loads(dados)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Campo 'dados' não é um JSON válido.",
+            ) from exc
+        
+        file_veg = get_optional_upload(form, "file_veg")
+        file_temp = get_optional_upload(form, "file_temp")
+        file_dem = get_optional_upload(form, "file_dem")
+        file_limite = get_optional_upload(form, "file_limite")
+        file_samples = get_optional_upload(form, "file_samples")  
+
+            
+
         simulation_id, simulation_dir = create_simulation_directory()
 
         dem_path = simulation_dir / "dem.tif"
@@ -443,9 +593,19 @@ async def simular_urbana(
         lst_path = simulation_dir / "lst.tif"
         samples_path = simulation_dir / "samples.geojson"
 
-        pacote = json.loads(dados)
+        
         bbox = pacote.get("bbox")
         perfis, alvos = pacote.get('perfis', []), pacote.get('alvos', [])
+
+        target_time_minutes = float(
+            pacote.get("tempo_alvo", 15)
+        )
+        if target_time_minutes <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="O tempo-alvo deve ser maior que zero.",
+        )
+
         formatos_saida, vis_formatos = pacote.get('formatos_export', ['shp', 'geojson']), pacote.get('formatos', ['hexagonos', 'isocronas'])
         modo_temp = pacote.get('modo_temp', 'manual')
         
@@ -530,6 +690,7 @@ async def simular_urbana(
 
         mask_geojson = gpd.GeoSeries([box(-180, -85, 180, 85).difference(poly)]).__geo_interface__
         rasters_vis = {}
+
         report_stats = {
             "area": report_stats_area,
             "rasters": {
@@ -828,115 +989,463 @@ async def simular_urbana(
         simulacoes_geojsons = []
         time_bands = [2, 5, 10, 15]
         
+        def export_gdf(gdf, base_name: str):
+            if "shp" in formatos_saida:
+                gdf.to_file(
+                    simulation_dir / f"{base_name}.shp",
+                    driver="ESRI Shapefile",
+                )
+
+            if "geojson" in formatos_saida:
+                gdf.to_file(
+                    simulation_dir / f"{base_name}.geojson",
+                    driver="GeoJSON",
+                )
+
+            if "kml" in formatos_saida:
+                try:
+                    gpd.io.file.fiona.drvsupport.supported_drivers["KML"] = "rw"
+                    gdf.to_file(
+                        simulation_dir / f"{base_name}.kml",
+                        driver="KML",
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Não foi possível exportar %s em KML: %s",
+                        base_name,
+                        exc,
+                    )
+        logger.warning(
+            "INÍCIO DO LAÇO: perfis recebidos=%s",
+            perfis,
+        )
+
         for perfil in perfis:
+
+            logger.warning(
+                "PROCESSANDO PERFIL=%s",
+                perfil,
+            )
+            nome_perfil = perfil.replace("_", " ").title()
+
             perfil_report = {
                 "codigo": perfil,
-                "nome": None,
+                "nome": nome_perfil,
                 "velocidade_base_kmh": None,
                 "quantidade_isocronas": 0,
                 "quantidade_hexagonos": 0,
                 "tempos_isocronas": [],
                 "tempos_hexagonos": [],
+                "area_alcancavel_m2": None,
+                "distancia_rede_m": None,
+                "tempo_base_minutos": None,
+                "tempo_ajustado_minutos": None,
+                "diferenca_minutos": None,
             }
 
-            speed_kmh, slope_mult, lst_limit, lst_scale = 4.5, 3.5, 25.0, 10.0
-            if "bike" in perfil or "ciclista" in perfil: speed_kmh = 11.0 if "crianca" in perfil else 10.0 if "idoso" in perfil else 15.0; slope_mult = 4.0 
-            else: speed_kmh = 3.5 if "crianca" in perfil else 3.0 if "idoso" in perfil else 4.5
-            if "crianca" in perfil or "idoso" in perfil: lst_limit, lst_scale = 23.0, 8.0; slope_mult = 4.5 if "pedestre" in perfil else 4.0
+            speed_kmh = 4.5
+            slope_mult = 3.5
+            lst_limit = 25.0
+            lst_scale = 10.0
 
-            speed_m_min = (speed_kmh * 1000) / 60
+            if "bike" in perfil or "ciclista" in perfil:
+                speed_kmh = (
+                    11.0
+                    if "crianca" in perfil
+                    else 10.0
+                    if "idoso" in perfil
+                    else 15.0
+                )
+                slope_mult = 4.0
+            else:
+                speed_kmh = (
+                    3.5
+                    if "crianca" in perfil
+                    else 3.0
+                    if "idoso" in perfil
+                    else 4.5
+                )
 
-            for u, v, k, data in G_proj.edges(keys=True, data=True):
-                fid = np.exp(-slope_mult * np.abs(data['slope'] + 0.05))
-                fit_lst = 1 + max(0, (data['lst'] - lst_limit) / lst_scale)
-                fit = fit_lst * data['fis']
-                
+            if "crianca" in perfil or "idoso" in perfil:
+                lst_limit = 23.0
+                lst_scale = 8.0
+                slope_mult = 4.5 if "pedestre" in perfil else 4.0
+
+            speed_m_min = (speed_kmh * 1000.0) / 60.0
+            perfil_report["velocidade_base_kmh"] = float(speed_kmh)
+
+            adjusted_time_attribute = f"time_{perfil}"
+            base_time_attribute = f"base_time_{perfil}"
+
+            for _, _, _, data in G_proj.edges(keys=True, data=True):
+                fid = np.exp(
+                    -slope_mult
+                    * np.abs(data["slope"] + 0.05)
+                )
+                fit_lst = 1 + max(
+                    0,
+                    (data["lst"] - lst_limit) / lst_scale,
+                )
+                fit = fit_lst * data["fis"]
+
                 eff_speed = speed_m_min * fid / fit
-                if np.isnan(eff_speed) or eff_speed < 0.1: eff_speed = 0.1 
-                
-                data[f'time_{perfil}'] = data['length'] / eff_speed
 
-            features_iso, polys_by_time = [], {}
+                if np.isnan(eff_speed) or eff_speed < 0.1:
+                    eff_speed = 0.1
+
+                # Tempo sem fatores ambientais.
+                data[base_time_attribute] = (
+                    data["length"] / speed_m_min
+                )
+
+                # Tempo com declividade, temperatura e vegetação.
+                data[adjusted_time_attribute] = (
+                    data["length"] / eff_speed
+                )
+
+            try:
+                _, adjusted_paths = nx.single_source_dijkstra(
+                    G_proj,
+                    center_node,
+                    cutoff=target_time_minutes,
+                    weight=adjusted_time_attribute,
+                )
+
+                candidate_metrics = []
+
+                for target_node, path_nodes in adjusted_paths.items():
+                    if target_node == center_node:
+                        continue
+
+                    path_metrics = calculate_path_metrics(
+                        graph=G_proj,
+                        path_nodes=path_nodes,
+                        adjusted_time_attribute=adjusted_time_attribute,
+                        base_time_attribute=base_time_attribute,
+                    )
+
+                    path_metrics["target_node"] = (
+                        int(target_node)
+                        if isinstance(target_node, (int, np.integer))
+                        else str(target_node)
+                    )
+
+                    candidate_metrics.append(path_metrics)
+
+                if candidate_metrics:
+                    farthest_path_metrics = max(
+                        candidate_metrics,
+                        key=lambda item: item["distancia_rede_m"],
+                    )
+                    perfil_report.update(farthest_path_metrics)
+
+            except Exception as exc:
+                logger.warning(
+                    "Não foi possível calcular métricas "
+                    "de rede para o perfil %s: %s",
+                    perfil,
+                    exc,
+                )
+
+            features_iso = []
+            polys_by_time = {}
+
             for t in sorted(time_bands):
-                subgraph = nx.ego_graph(G_proj, center_node, radius=t, distance=f'time_{perfil}')
-                iso_poly_proj = ox.graph_to_gdfs(subgraph, nodes=False).unary_union.buffer(80) if len(subgraph.edges) > 0 else Point(G_proj.nodes[center_node]['x'], G_proj.nodes[center_node]['y']).buffer(80)
-                polys_by_time[t] = preencher_buracos(iso_poly_proj)
+                subgraph = nx.ego_graph(
+                    G_proj,
+                    center_node,
+                    radius=t,
+                    distance=adjusted_time_attribute,
+                )
+
+                if len(subgraph.edges) > 0:
+                    iso_poly_proj = (
+                        ox.graph_to_gdfs(
+                            subgraph,
+                            nodes=False,
+                        )
+                        .unary_union
+                        .buffer(80)
+                    )
+                else:
+                    iso_poly_proj = Point(
+                        G_proj.nodes[center_node]["x"],
+                        G_proj.nodes[center_node]["y"],
+                    ).buffer(80)
+
+                polys_by_time[t] = preencher_buracos(
+                    iso_poly_proj
+                )
 
             previous_poly = Polygon()
+
             for t in sorted(time_bands):
                 current_poly = polys_by_time[t]
                 ring = current_poly.difference(previous_poly)
-                if not ring.is_empty: 
-                    ring_clipped = gpd.GeoDataFrame(geometry=[ring], crs=G_proj.graph['crs']).to_crs("EPSG:4326").geometry.iloc[0].buffer(0).intersection(poly)
+
+                if not ring.is_empty:
+                    ring_clipped = (
+                        gpd.GeoDataFrame(
+                            geometry=[ring],
+                            crs=G_proj.graph["crs"],
+                        )
+                        .to_crs("EPSG:4326")
+                        .geometry.iloc[0]
+                        .buffer(0)
+                        .intersection(poly)
+                    )
+
                     if not ring_clipped.is_empty:
-                        nome_perfil = perfil.replace('_', ' ').title()
-                        if ring_clipped.geom_type == 'MultiPolygon':
-                            for p in ring_clipped.geoms: features_iso.append({"perfil": nome_perfil, "tipo": "isocronas", "time_band": t, "geometry": p})
-                        else: features_iso.append({"perfil": nome_perfil, "tipo": "isocronas", "time_band": t, "geometry": ring_clipped})
+                        if ring_clipped.geom_type == "MultiPolygon":
+                            for polygon_part in ring_clipped.geoms:
+                                features_iso.append({
+                                    "perfil": nome_perfil,
+                                    "tipo": "isocronas",
+                                    "time_band": t,
+                                    "geometry": polygon_part,
+                                })
+                        else:
+                            features_iso.append({
+                                "perfil": nome_perfil,
+                                "tipo": "isocronas",
+                                "time_band": t,
+                                "geometry": ring_clipped,
+                            })
+
                 previous_poly = current_poly
 
             if features_iso:
-                gdf_mapped = gpd.GeoDataFrame(features_iso, crs="EPSG:4326")
+                gdf_mapped = gpd.GeoDataFrame(
+                    features_iso,
+                    crs="EPSG:4326",
+                )
                 union_mapped = gdf_mapped.unary_union
                 rest_poly = poly.difference(union_mapped)
-            else: rest_poly = poly
-            
-            if not rest_poly.is_empty and rest_poly.area > 1e-7:
-                nome_perfil = perfil.replace('_', ' ').title()
-                if rest_poly.geom_type == 'MultiPolygon':
-                    for p in rest_poly.geoms: features_iso.append({"perfil": nome_perfil, "tipo": "isocronas", "time_band": 30, "geometry": p})
-                else: features_iso.append({"perfil": nome_perfil, "tipo": "isocronas", "time_band": 30, "geometry": rest_poly})
+            else:
+                rest_poly = poly
 
-            gdf_iso = gpd.GeoDataFrame(features_iso, crs="EPSG:4326")
-            
-            def export_gdf(gdf, base_name: str):
-                if "shp" in formatos_saida:
-                    gdf.to_file(
-                        simulation_dir / f"{base_name}.shp",
-                        driver="ESRI Shapefile",
+            if (
+                not rest_poly.is_empty
+                and rest_poly.area > 1e-7
+            ):
+                if rest_poly.geom_type == "MultiPolygon":
+                    for polygon_part in rest_poly.geoms:
+                        features_iso.append({
+                            "perfil": nome_perfil,
+                            "tipo": "isocronas",
+                            "time_band": 30,
+                            "geometry": polygon_part,
+                        })
+                else:
+                    features_iso.append({
+                        "perfil": nome_perfil,
+                        "tipo": "isocronas",
+                        "time_band": 30,
+                        "geometry": rest_poly,
+                    })
+
+            gdf_iso = gpd.GeoDataFrame(
+                features_iso,
+                crs="EPSG:4326",
+            )
+
+            if not gdf_iso.empty:
+                perfil_report["quantidade_isocronas"] = int(
+                    len(gdf_iso)
+                )
+                perfil_report["tempos_isocronas"] = sorted({
+                    int(value)
+                    for value in (
+                        gdf_iso["time_band"]
+                        .dropna()
+                        .tolist()
+                    )
+                })
+
+                reachable_rows = gdf_iso[
+                    gdf_iso["time_band"]
+                    <= target_time_minutes
+                ]
+
+                if not reachable_rows.empty:
+                    reachable_union = (
+                        reachable_rows.geometry.unary_union
                     )
 
-                if "geojson" in formatos_saida:
-                    gdf.to_file(
-                        simulation_dir / f"{base_name}.geojson",
-                        driver="GeoJSON",
+                    reachable_gdf = gpd.GeoDataFrame(
+                        geometry=[reachable_union],
+                        crs="EPSG:4326",
                     )
 
-                if "kml" in formatos_saida:
-                    try:
-                        gpd.io.file.fiona.drvsupport.supported_drivers["KML"] = "rw"
+                    reachable_metric_crs = (
+                        reachable_gdf.estimate_utm_crs()
+                        or "EPSG:3857"
+                    )
 
-                        gdf.to_file(
-                            simulation_dir / f"{base_name}.kml",
-                            driver="KML",
+                    perfil_report["area_alcancavel_m2"] = float(
+                        reachable_gdf
+                        .to_crs(reachable_metric_crs)
+                        .geometry.iloc[0]
+                        .area
+                    )
+
+            if (
+                "isocronas" in vis_formatos
+                and not gdf_iso.empty
+            ):
+                simulacoes_geojsons.append(
+                    gdf_iso.to_json()
+                )
+                export_gdf(
+                    gdf_iso,
+                    f"isocronas_{perfil}",
+                )
+
+            if (
+                "hexagonos" in vis_formatos
+                and not gdf_iso.empty
+            ):
+                hex_grid = create_hex_grid(
+                    poly,
+                    res=10,
+                )
+
+                hex_grid["time_band"] = 999
+                hex_grid["perfil"] = nome_perfil
+                hex_grid["tipo"] = "hexagonos"
+
+                for _, row in gdf_iso.iterrows():
+                    time_band = row["time_band"]
+                    intersecting = (
+                        hex_grid.geometry.intersects(
+                            row["geometry"]
                         )
-                    except Exception as exc:
-                        logger.warning(
-                            "Não foi possível exportar %s em KML: %s",
-                            base_name,
-                            exc,
+                    )
+
+                    hex_grid.loc[
+                        intersecting
+                        & (
+                            hex_grid["time_band"]
+                            > time_band
+                        ),
+                        "time_band",
+                    ] = time_band
+
+                hex_grid.loc[
+                    hex_grid["time_band"] == 999,
+                    "time_band",
+                ] = 30
+
+                if not hex_grid.empty:
+                    simulacoes_geojsons.append(
+                        hex_grid.to_json()
+                    )
+                    export_gdf(
+                        hex_grid,
+                        f"hexagonos_{perfil}",
+                    )
+
+                    perfil_report[
+                        "quantidade_hexagonos"
+                    ] = int(len(hex_grid))
+
+                    perfil_report[
+                        "tempos_hexagonos"
+                    ] = sorted({
+                        int(value)
+                        for value in (
+                            hex_grid["time_band"]
+                            .dropna()
+                            .tolist()
                         )
-            
-            if 'isocronas' in vis_formatos and not gdf_iso.empty:
-                simulacoes_geojsons.append(gdf_iso.to_json()); export_gdf(gdf_iso, f"isocronas_{perfil}")
-            if 'hexagonos' in vis_formatos and not gdf_iso.empty:
-                hex_grid = create_hex_grid(poly, res=10)
-                hex_grid['time_band'], hex_grid['perfil'], hex_grid['tipo'] = 999, nome_perfil, 'hexagonos'
-                for idx, row in gdf_iso.iterrows():
-                    t = row['time_band']
-                    intersecting = hex_grid.geometry.intersects(row['geometry'])
-                    hex_grid.loc[intersecting & (hex_grid['time_band'] > t), 'time_band'] = t
-                
-                hex_grid.loc[hex_grid['time_band'] == 999, 'time_band'] = 30
-                if not hex_grid.empty: simulacoes_geojsons.append(hex_grid.to_json()); export_gdf(hex_grid, f"hexagonos_{perfil}")
+                    })
+
+
+            logger.warning(
+                "DEBUG APPEND PERFIL: simulation=%s perfil=%s perfil_report=%s",
+                simulation_id,
+                perfil,
+                perfil_report,
+            )
+            # Deve ficar dentro do laço de perfis.
+            report_stats["perfis"].append(perfil_report)
+
+            logger.warning(
+                "DEBUG PERFIS APÓS APPEND: %s",
+                report_stats["perfis"],
+            )
+
+        # Deve ficar fora do laço de perfis.
+        reachable_areas = [
+            profile.get("area_alcancavel_m2")
+            for profile in report_stats["perfis"]
+            if profile.get("area_alcancavel_m2")
+            is not None
+        ]
+
+        report_stats["area_alcancavel_m2"] = (
+            max(reachable_areas)
+            if reachable_areas
+            else None
+        )
 
         gdf_pois = get_osm_pois(poly, alvos)
-        if not gdf_pois.empty:
-            gdf_pois_clean = gdf_pois[[c for c in ['categoria', 'geometry'] if c in gdf_pois.columns]]
-            geojson_osm = gdf_pois_clean.to_json(); export_gdf(gdf_pois_clean, "equipamentos_osm")
-        else: geojson_osm = "{}"
 
-        zip_path = simulation_dir / "Resultados_Smart15.zip"
+        pois_por_categoria = {
+            categoria: 0
+            for categoria in alvos
+        }
+
+        if not gdf_pois.empty:
+            category_counts = (
+                gdf_pois["categoria"]
+                .value_counts()
+                .to_dict()
+            )
+
+            for categoria, quantidade in (
+                category_counts.items()
+            ):
+                pois_por_categoria[
+                    str(categoria)
+                ] = int(quantidade)
+
+            report_stats["pois"] = {
+                "total": int(len(gdf_pois)),
+                "por_categoria": pois_por_categoria,
+            }
+
+            gdf_pois_clean = gdf_pois[
+                [
+                    column
+                    for column in [
+                        "categoria",
+                        "geometry",
+                    ]
+                    if column in gdf_pois.columns
+                ]
+            ]
+
+            geojson_osm = gdf_pois_clean.to_json()
+            export_gdf(
+                gdf_pois_clean,
+                "equipamentos_osm",
+            )
+        else:
+            report_stats["pois"] = {
+                "total": 0,
+                "por_categoria": pois_por_categoria,
+            }
+
+            geojson_osm = json.dumps({
+                "type": "FeatureCollection",
+                "features": [],
+            })
+
+        zip_path = (
+            simulation_dir
+            / "Resultados_Smart15.zip"
+        )
 
         with zipfile.ZipFile(
             zip_path,
@@ -952,7 +1461,9 @@ async def simular_urbana(
 
                 zipf.write(
                     file_path,
-                    arcname=file_path.relative_to(simulation_dir),
+                    arcname=file_path.relative_to(
+                        simulation_dir
+                    ),
                 )
 
         logger.info(
@@ -988,6 +1499,10 @@ async def simular_urbana(
             )
         )
 
+        logger.warning(
+            "ANTES DO RETURN: report_stats.perfis=%s",
+            report_stats.get("perfis"),
+        )
 
         return {
             "status": "sucesso",
@@ -997,24 +1512,30 @@ async def simular_urbana(
                 "osm_targets": geojson_osm,
                 "bbox_rasters": bbox,
                 "rasters_vis": rasters_vis,
-                "mask_geojson": json.dumps(mask_geojson),
-                "download_url": f"/download_zip/{simulation_id}",
+                "mask_geojson": json.dumps(
+                    mask_geojson
+                ),
+                "download_url": (
+                    f"/download_zip/{simulation_id}"
+                ),
                 "report": report_stats,
             },
         }
-    except Exception as exc:
-        logger.error(
-            "Erro fatal na simulação [%s]: %s",
-            simulation_id or "não criada",
-            exc,
-        )
-        logger.error(traceback.format_exc())
 
-        return {
-            "status": "erro",
-            "simulation_id": simulation_id,
-            "mensagem": str(exc),
-        }
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+        logger.exception(
+            "Erro durante a simulação. simulation_id=%s",
+            simulation_id,
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Erro interno durante a simulação.",
+        ) from exc
+    
 @app.get("/download_zip/{simulation_id}")
 async def download_zip(simulation_id: str):
     simulation_dir = get_simulation_directory(simulation_id)

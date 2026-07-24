@@ -36,8 +36,20 @@ export interface SimulationConfiguration {
     pavement?: number;
     crossings?: number;
     accessibility?: number;
+    temperature?: number;
   };
+
+  selectedProfiles?: string[];
+  selectedProfileLabels?: string[];
+
+  selectedDestinations?: string[];
+  selectedDestinationLabels?: string[];
+
+  outputFormats?: string[];
+
+  [key: string]: unknown;
 }
+
 
 export interface RouteIndicators {
   /**
@@ -47,28 +59,33 @@ export interface RouteIndicators {
 
   /**
    * Distância calculada para o deslocamento.
+   * Null quando o backend não fornece essa métrica.
    */
-  distanceMeters: number;
+  distanceMeters: number | null;
 
   /**
    * Tempo estimado sem aplicação das ponderações.
+   * Null quando não foi calculado.
    */
-  baseTimeMinutes: number;
+  baseTimeMinutes: number | null;
 
   /**
    * Tempo final após aplicação das ponderações.
+   * Null quando não foi calculado.
    */
-  adjustedTimeMinutes: number;
+  adjustedTimeMinutes: number | null;
 
   /**
    * Velocidade média resultante.
+   * Null quando distância ou tempo não estão disponíveis.
    */
-  averageSpeedKmH: number;
+  averageSpeedKmH: number | null;
 
   /**
    * Área alcançável dentro do tempo-alvo.
+   * Null quando o backend não fornece a métrica.
    */
-  reachableAreaSquareMeters: number;
+  reachableAreaSquareMeters: number | null;
 
   slope: {
     averagePercent: number | null;
@@ -105,7 +122,8 @@ export interface FactorImpact {
     | "treeCoverage"
     | "pavement"
     | "crossings"
-    | "accessibility";
+    | "accessibility"
+    | "temperature";
 
   label: string;
   rawValue: number;
