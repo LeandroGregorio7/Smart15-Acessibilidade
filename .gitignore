@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Resultados e cache do backend
+backend/temp_export/
+backend/cache/
+backend/exportacao_smart15.zip
+Resultados_Smart15.zip
+
+# Node
+**/node_modules/
+**/dist/
+**/.vite/
+
+# IDE
+.idea/
+.vscode/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db

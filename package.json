@@ -1,0 +1,7 @@
+{
+  "name": "smart15-acessibilidade",
+  "private": true,
+  "scripts": {
+    "prepare:smart15": "./scripts/build-plugin.sh"
+  }
+}
