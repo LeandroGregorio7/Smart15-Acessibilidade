@@ -1,9 +1,9 @@
 .git
-.gitignore
 
 **/node_modules
 **/.vite
-**/dist
+plugin/dist
+geolibre/apps/geolibre-desktop/dist
 **/coverage
 
 backend/temp_export

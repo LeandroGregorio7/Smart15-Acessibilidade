@@ -57,3 +57,7 @@ services:
 networks:
   smart15-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.250.0/24
+          gateway: 172.29.250.1

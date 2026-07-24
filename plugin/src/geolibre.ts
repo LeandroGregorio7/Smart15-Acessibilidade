@@ -1,4 +1,7 @@
 //#region src/geolibre.ts
+import { openPrintableReport } from "./report/report.generator";
+import { adaptSimulationToReport } from "./report/report.adapter";
+import { captureMapAsDataUrl } from "./report/map.capture";
 const painelHtml = `
   <style>
     #smart15-main-wrapper { transition: all 0.3s ease; height: 100vh; overflow-y: auto; padding: 20px; font-family: Arial, sans-serif; box-sizing: border-box; }
@@ -77,6 +80,7 @@ const painelHtml = `
       <g id="icon-warn"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></g>
       <g id="icon-circle-fill"><circle cx="12" cy="12" r="10"/></g>
       <g id="icon-camera"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></g>
+      <g id="icon-map"><polygon points="1 6 8 2 16 6 23 2 23 18 16 22 8 18 1 22 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></g>
     </defs>
   </svg>
 
@@ -114,6 +118,13 @@ const painelHtml = `
           <p><b>4. Recorte Visual (Máscara):</b> Na Caixa 7, ative "✂️ Isolar Município" para esconder o entorno e focar apenas na sua geometria de estudo.</p>
           <p><b>5. Consultar Dados (Popups):</b> Ligue a caixa " ATIVAR IDENTIFICADOR (i)". Passe o rato sobre qualquer geometria para ver os dados de Tempo, Perfil, Categorias de Equipamentos OSM e Classificações da IA. Para ler valores exatos de Satélite (Calor/Relevo), use a <b>Legenda Dinâmica Exata</b> na secção 7.</p>
           <p><b>6. Cortina Comparativa (Swipe):</b> Ao ativar a cortina, a tela é dividida. Para comparar, oculte camadas no painel (ícone de olho). O lado <b>Esquerdo</b> ficará congelado com o cenário anterior, e o <b>Direito</b> refletirá suas mudanças.</p>
+          <p><b>7. Exportar Relatório:</b> Clique no botão "Exportar Relatório" para gerar um PDF com o mapa, gráficos e dados do estudo.</p>
+          <p><b>8. Exportar Dados:</b> Clique no botão "Exportar Dados" para baixar os dados em formato GeoJSON, CSV ou Shapefile.</p>
+          <p> 
+          <b>9. A IA e as Amostras (Desenhar ou Subir GeoJSON):</b><br>
+            • <b>Desenhar na tela:</b> Mude o mapa de fundo para <i>Satélite</i> na Caixa 2, escolha a classe e desenhe sobre o mapa (botão DIREITO fecha o polígono).<br>
+            • <b>Subir GeoJSON externo:</b> A tabela de atributos do seu arquivo <u>OBRIGATORIAMENTE</u> deve ter a coluna <code>classe</code> preenchida apenas com os <b>números de 1 a 6</b> (1-Asfalto, 2-Calçada, 3-Construção, 4-Árvore, 5-Grama, 6-Terra). Se quiser colocar o nome por extenso, crie uma coluna separada chamada <code>descritor</code>.
+          </p>
       </div>
       <button id="btnCloseInstrucoes" style="padding: 10px 15px; background: #e53e3e; color: white; border: none; border-radius: 4px; cursor: pointer; float: right; margin-top: 10px; font-weight: bold;">Fechar Instruções</button>
     </div>
@@ -163,14 +174,41 @@ const painelHtml = `
     </div>
 
     <div style="margin-bottom: 24px; border-top: 1px solid; padding-top: 16px;" class="s15-border">
-      <label class="s15-label" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 4px;">2. Amostras (Treinamento IA)</label>
-      <div style="display: flex; flex-direction: column; gap: 6px;">
-        <input type="file" id="sampleFileInput" accept=".geojson,.kml,.zip" style="display: none;" />
-        <button id="btnUploadSamples" class="s15-card s15-text" style="width: 100%; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: 500; cursor: pointer; display:flex; align-items:center; justify-content:center;">
-            <svg viewBox="0 0 24 24" class="s15-icon"><use href="#icon-import"/></svg> Subir Ficheiro de Amostras
-        </button>
+      <label class="s15-label" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 4px;">2. Amostras Locais (Treinamento IA)</label>
+
+      <div style="margin-bottom: 10px; background-color: #f0fdf4; border: 1px dashed #4ade80; padding: 8px; border-radius: 4px;">
+        <label style="font-size: 11px; font-weight: bold; color: #166534; display: flex; align-items: center; margin-bottom: 4px;">
+          <svg viewBox="0 0 24 24" class="s15-icon"><use href="#icon-map"/></svg> Mapa de fundo
+        </label>
+        <select id="basemapSelect" style="width: 100%; padding: 6px; border-radius: 4px; border: 1px solid #4ade80; font-size: 11px; cursor: pointer;">
+          <option value="default">Rua / padrão do GeoLibre</option>
+          <option value="satellite">Satélite (Esri World Imagery)</option>
+        </select>
+        <span style="font-size: 9px; color: #1c4532; display:block; margin-top:4px;">Use o satélite como referência para desenhar árvores, telhados e demais classes.</span>
       </div>
-      <div id="sampleStatus" class="s15-text" style="font-size: 11px; margin-top: 6px; font-style: italic;">Nenhuma amostra carregada</div>
+
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <input type="file" id="sampleFileInput" accept=".geojson,.json" style="display: none;" />
+        <button id="btnUploadSamples" class="s15-card s15-text" style="width: 100%; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: 500; cursor: pointer; display:flex; align-items:center; justify-content:center;">
+          <svg viewBox="0 0 24 24" class="s15-icon"><use href="#icon-import"/></svg> Enviar arquivo de amostras
+        </button>
+
+        <div style="display: flex; gap: 4px; align-items: center;">
+          <select id="drawSampleClass" class="s15-border s15-text" style="flex: 2; padding: 6px; border-radius: 4px; border-width: 1px; font-size: 11px; cursor: pointer; background-color: #fff;">
+            <option value="1">1 - Asfalto / Via</option>
+            <option value="2">2 - Calçada / Passeio</option>
+            <option value="3">3 - Construção / Telhado</option>
+            <option value="4">4 - Árvore</option>
+            <option value="5">5 - Grama / Rasteira</option>
+            <option value="6">6 - Terra Exposta</option>
+          </select>
+          <button id="btnDrawSample" class="draw-tool" title="Desenhar amostra no mapa" style="flex: 1; padding: 6px; border-radius: 4px; cursor: pointer; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:bold;">
+            <svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-poly"/></svg> Desenhar
+          </button>
+        </div>
+      </div>
+
+      <div id="sampleStatus" class="s15-text" style="font-size: 11px; margin-top: 6px; font-style: italic;">Nenhuma amostra desenhada ou carregada</div>
       <div id="sampleCoords" style="font-family: monospace; font-size: 10px; color: #c05621; margin-top: 4px; word-break: break-all;"></div>
     </div>
 
@@ -384,6 +422,35 @@ const painelHtml = `
         <strong style="color:inherit;"><svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-download"/></svg> FAZER DOWNLOAD DO .ZIP</strong>
       </button>
 
+      <button
+        id="btnGenerateReport"
+        class="smart15-btn-export"
+        style="
+          display: none;
+          background: #fffaf0;
+          border-color: #d69e2e;
+          color: #975a16;
+        "
+      >
+        <strong
+          style="
+            color: inherit;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          "
+        >
+          <svg
+            viewBox="0 0 24 24"
+            class="s15-icon s15-icon-btn"
+          >
+            <use href="#icon-book"/>
+          </svg>
+
+          GERAR RELATÓRIO TÉCNICO
+        </strong>
+      </button>
+
       <button id="btnScreenshot" class="smart15-btn-export" style="background: #ebf8ff; border-color: #63b3ed; color: #2b6cb0;">
         <strong style="color:inherit;"><svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-camera"/></svg> CAPTURAR MAPA (SCREENSHOT)</strong>
       </button>
@@ -392,16 +459,281 @@ const painelHtml = `
   </div>
 `;
 
-let bboxCapturada = null;
-let geometriaGeoJSON = null;
-let amostrasGeoJSON = null;
+type SampleProperties = {
+    classe: number;
+    classe_nome: string;
+};
+
+type SamplePolygonFeature = {
+    type: "Feature";
+    properties: SampleProperties;
+    geometry: {
+        type: "Polygon";
+        coordinates: number[][][];
+    };
+};
+
+type SampleFeatureCollection = {
+    type: "FeatureCollection";
+    features: SamplePolygonFeature[];
+};
+
+const SAMPLE_SOURCE_ID = "smart15-input-samples";
+const SAMPLE_FILL_LAYER_ID = `${SAMPLE_SOURCE_ID}-fill`;
+const SAMPLE_LINE_LAYER_ID = `${SAMPLE_SOURCE_ID}-line`;
+const SATELLITE_SOURCE_ID = "smart15-esri-satellite";
+const SATELLITE_LAYER_ID = "smart15-satellite-layer";
+
+const MAX_IDENTIFIED_FEATURES = 7;
+const MAX_IDENTIFIED_PROPERTIES = 8;
+const MAX_PROPERTY_VALUE_LENGTH = 160;
+
+const IDENTIFIABLE_LAYER_TYPES = new Set([
+  "fill",
+  "line",
+  "circle",
+  "symbol",
+  "fill-extrusion",
+  "heatmap",
+]);
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function formatPropertyValue(value: unknown): string {
+  let formattedValue: string;
+
+  if (value === null || value === undefined) {
+    formattedValue = "Não informado";
+  } else if (typeof value === "object") {
+    try {
+      formattedValue = JSON.stringify(value);
+    } catch {
+      formattedValue = String(value);
+    }
+  } else {
+    formattedValue = String(value);
+  }
+
+  if (formattedValue.length > MAX_PROPERTY_VALUE_LENGTH) {
+    formattedValue =
+      formattedValue.slice(0, MAX_PROPERTY_VALUE_LENGTH) + "…";
+  }
+
+  return escapeHtml(formattedValue);
+}
+
+function getFeatureTitle(feature: any): string {
+  const properties = feature?.properties ?? {};
+
+  const preferredTitle =
+    properties.nome ??
+    properties.name ??
+    properties.label ??
+    properties.titulo ??
+    properties.title ??
+    properties.categoria ??
+    properties.tipo ??
+    properties.classe ??
+    properties.class;
+
+  if (preferredTitle !== undefined && preferredTitle !== null) {
+    return escapeHtml(preferredTitle);
+  }
+
+  return escapeHtml(
+    feature?.layer?.id
+      ?? feature?.sourceLayer
+      ?? feature?.source
+      ?? "Feição identificada",
+  );
+}
+
+function isIdentifiableFeature(feature: any): boolean {
+  if (!feature?.layer) {
+    return false;
+  }
+
+  const layerType = feature.layer.type;
+
+  if (
+    layerType
+    && !IDENTIFIABLE_LAYER_TYPES.has(layerType)
+  ) {
+    return false;
+  }
+
+  const properties = feature.properties;
+
+  return Boolean(
+    properties
+    && typeof properties === "object"
+    && Object.keys(properties).length > 0
+  );
+}
+
+function getFeatureKey(feature: any): string {
+  const properties = feature?.properties ?? {};
+
+  return [
+    feature?.layer?.id ?? "",
+    feature?.source ?? "",
+    feature?.sourceLayer ?? "",
+    feature?.id ?? "",
+    JSON.stringify(properties),
+  ].join("|");
+}
+
+function buildFeatureTooltipHtml(features: any[]): string {
+  if (features.length === 0) {
+    return `
+      <div style="color:#718096; font-style:italic;">
+        Nenhuma feição identificável neste ponto.
+      </div>
+    `;
+  }
+
+  return features
+    .slice(0, MAX_IDENTIFIED_FEATURES)
+    .map((feature) => {
+      const properties = feature.properties ?? {};
+
+      const propertyEntries = Object.entries(properties)
+        .filter(([key]) => {
+          const normalizedKey = key.toLowerCase();
+
+          return ![
+            "geometry",
+            "geom",
+            "the_geom",
+          ].includes(normalizedKey);
+        })
+        .slice(0, MAX_IDENTIFIED_PROPERTIES);
+
+      const propertyRows = propertyEntries
+        .map(([key, value]) => {
+          return `
+            <div
+              style="
+                display:grid;
+                grid-template-columns:minmax(80px, 40%) 1fr;
+                gap:6px;
+                margin-top:3px;
+              "
+            >
+              <strong
+                style="
+                  overflow-wrap:anywhere;
+                  color:#4a5568;
+                "
+              >
+                ${escapeHtml(key)}
+              </strong>
+
+              <span
+                style="
+                  overflow-wrap:anywhere;
+                  color:#1a202c;
+                "
+              >
+                ${formatPropertyValue(value)}
+              </span>
+            </div>
+          `;
+        })
+        .join("");
+
+      const hiddenPropertyCount =
+        Object.keys(properties).length - propertyEntries.length;
+
+      const hiddenPropertiesMessage =
+        hiddenPropertyCount > 0
+          ? `
+            <div
+              style="
+                margin-top:5px;
+                color:#718096;
+                font-size:11px;
+                font-style:italic;
+              "
+            >
+              + ${hiddenPropertyCount}
+              propriedade(s) não apresentada(s)
+            </div>
+          `
+          : "";
+
+      return `
+        <section
+          style="
+            margin-bottom:8px;
+            padding-bottom:8px;
+            border-bottom:1px solid #e2e8f0;
+          "
+        >
+          <div
+            style="
+              color:#2c5282;
+              font-weight:bold;
+              margin-bottom:5px;
+              overflow-wrap:anywhere;
+            "
+          >
+            ${getFeatureTitle(feature)}
+          </div>
+
+          <div
+            style="
+              color:#718096;
+              font-size:10px;
+              margin-bottom:5px;
+              overflow-wrap:anywhere;
+            "
+          >
+            Camada:
+            ${escapeHtml(feature?.layer?.id ?? "não informada")}
+          </div>
+
+          ${propertyRows}
+          ${hiddenPropertiesMessage}
+        </section>
+      `;
+    })
+    .join("");
+}
+
+const SAMPLE_CLASSES: Record<number, string> = {
+    1: "Asfalto / Via",
+    2: "Calçada / Passeio",
+    3: "Construção / Telhado",
+    4: "Árvore",
+    5: "Grama / Rasteira",
+    6: "Terra Exposta"
+};
+
+type BBox = [number, number, number, number];
+
+let bboxCapturada: BBox | null = null;
+let geometriaGeoJSON: any = null;
+let amostrasGeoJSON: SampleFeatureCollection | null = null;
 let isDrawingMode = false;
-let layersAtivos = [];
-let downloadUrlZip = null;
-let maskDataGeoJSON = null;
+let layersAtivos: string[] = [];
+let downloadUrlZip: string | null = null;
+let maskDataGeoJSON: string | null = null;
 let isInfoMode = false;
 let isSwipeMode = false;
-let secondMapInstance = null;
+let secondMapInstance: any = null;
+let ultimoResultadoSimulacao: any = null;
+let ultimaConfiguracaoSimulacao: any = null;
+let ultimaCapturaMapa: string | null = null;
+let cleanupIdentifyHandlers: (() => void) | null = null;
+
 
 const SVG_ICONS = {
     SUCCESS: '<svg viewBox="0 0 24 24" class="s15-icon" style="stroke:#38a169"><use href="#icon-check"/></svg>',
@@ -437,6 +769,8 @@ const calculateBBox = (geojson: any) => {
     return null;
 };
 
+
+
 export const plugin = {
 	id: "smart15-orquestrador",
 	name: "Smart-15: Acessibilidade",
@@ -454,102 +788,297 @@ export const plugin = {
 					container.appendChild(wrap);
 
                     const mapObj = getMapInstance(app);
-                    
-                    let tooltip = document.getElementById('smart15-tooltip');
+                   
+                    let tooltip =
+                    document.getElementById(
+                        "smart15-tooltip",
+                    ) as HTMLDivElement | null;
+
                     if (!tooltip) {
-                        tooltip = document.createElement('div');
-                        tooltip.id = 'smart15-tooltip';
-                        tooltip.style.position = 'absolute';
-                        tooltip.style.background = '#ffffff';
-                        tooltip.style.padding = '10px';
-                        tooltip.style.border = '2px solid #2b6cb0';
-                        tooltip.style.borderRadius = '6px';
-                        tooltip.style.pointerEvents = 'none';
-                        tooltip.style.display = 'none';
-                        tooltip.style.zIndex = '99999';
-                        tooltip.style.fontSize = '12px';
-                        tooltip.style.maxHeight = '300px';
-                        tooltip.style.overflowY = 'auto';
-                        tooltip.style.boxShadow = '0 4px 6px rgba(0,0,0,0.3)';
-                        document.body.appendChild(tooltip);
+                    tooltip = document.createElement("div");
+                    tooltip.id = "smart15-tooltip";
+
+                    tooltip.style.cssText = `
+                        position: fixed;
+                        display: none;
+                        z-index: 99999;
+                        width: min(520px, calc(100vw - 24px));
+                        max-width: 520px;
+                        max-height: min(70vh, 620px);
+                        overflow-y: hidden;
+                        overflow-x: hidden;
+                        padding: 10px;
+                        border: 2px solid #2b6cb0;
+                        border-radius: 6px;
+                        background: #ffffff;
+                        color: #1a202c;
+                        box-shadow:
+                        0 4px 12px rgba(0, 0, 0, 0.30);
+                        font-size: 12px;
+                        line-height: 1.35;
+                        pointer-events: none;
+                        box-sizing: border-box;
+                    `;
+
+                    document.body.appendChild(tooltip);
                     }
 
-                    if (mapObj && !(mapObj as any)._silencedMissingImages) {
-                        (mapObj as any)._silencedMissingImages = true;
-                        mapObj.on('styleimagemissing', (e: any) => {
-                            const canvas = document.createElement('canvas'); canvas.width = 1; canvas.height = 1;
-                            try { mapObj.addImage(e.id, (canvas.getContext('2d') as CanvasRenderingContext2D).getImageData(0, 0, 1, 1)); } catch(err) {}
-                        });
-                        
-                        mapObj.on('mousemove', (e: any) => {
-                            if (!isInfoMode) return;
-                            const features = mapObj.queryRenderedFeatures(e.point);
-                            const myFeats = features.filter((f: any) => f.layer.id.includes('smart15') && f.properties);
-                            
-                            if (myFeats.length > 0) {
-                                tooltip!.style.display = 'block';
-                                tooltip!.style.left = (e.originalEvent.pageX + 15) + 'px';
-                                tooltip!.style.top = (e.originalEvent.pageY + 15) + 'px';
-                                
-                                let innerHTML = '';
-                                const seen = new Set();
-                                
-                                myFeats.forEach((f: any) => {
-                                    const props = f.properties;
-                                    const strProps = JSON.stringify(props);
-                                    if(seen.has(strProps)) return; 
-                                    seen.add(strProps);
-                                    
-                                    if (props.tipo === 'isocronas' || props.tipo === 'hexagonos') {
-                                        innerHTML += `<div style="margin-bottom:6px; border-bottom:1px solid #e2e8f0; padding-bottom:4px;">
-                                            <span style="color:#2c5282;"><b>⚙️ Perfil:</b> ${props.perfil}</span><br>
-                                            <span style="color:#e53e3e;"><b>⏱️ Tempo:</b> ${props.time_band} min</span><br>
-                                            <span style="color:#38a169;"><b>💠 Tipo:</b> ${props.tipo}</span>
-                                        </div>`;
-                                    } else if (props.categoria) {
-                                        innerHTML += `<div style="margin-bottom:6px; border-bottom:1px solid #e2e8f0; padding-bottom:4px;">
-                                            <span style="color:#d69e2e;"><b>📍 POI (Equipamento):</b></span><br>
-                                            <b>Tipo:</b> ${props.categoria.toUpperCase()}
-                                        </div>`;
-                                    } else if (props.class || props.classe || props.nome || props.label) {
-                                        const c = props.class || props.classe || props.nome || props.label;
-                                        innerHTML += `<div style="margin-bottom:6px; border-bottom:1px solid #e2e8f0; padding-bottom:4px;">
-                                            <span style="color:#805ad5;"><b>🎯 Amostra / Vetor:</b></span><br>
-                                            <b>Classe:</b> ${c.toUpperCase()}
-                                        </div>`;
-                                    } else {
-                                        let propStr = '';
-                                        for (let key in props) {
-                                            if (key !== 'id' && key !== 'fid') { propStr += `<b>${key}:</b> ${props[key]}<br>`; }
-                                        }
-                                        if(propStr) {
-                                            innerHTML += `<div style="margin-bottom:6px; border-bottom:1px solid #e2e8f0; padding-bottom:4px;">
-                                                <span style="color:#4a5568;"><b>Dados da Camada:</b></span><br>${propStr}
-                                            </div>`;
-                                        }
-                                    }
-                                });
+                    const toggleInfoMode =
+                    wrap.querySelector(
+                        "#toggleInfoMode",
+                    ) as HTMLInputElement;
 
-                                if (innerHTML === '') {
-                                    tooltip!.innerHTML = `<span style="color:#718096; font-style:italic;">(Nenhum dado vetorial detectado aqui. Para Rasters, leia a Legenda Dinâmica na Caixa 7)</span>`;
-                                } else {
-                                    tooltip!.innerHTML = innerHTML;
-                                }
-                                mapObj.getCanvas().style.cursor = 'crosshair';
-                            } else {
-                                tooltip!.style.display = 'none';
-                                mapObj.getCanvas().style.cursor = 'help';
+                    const onStyleImageMissing = (
+                    event: any,
+                    ): void => {
+                    if (
+                        !mapObj
+                        || mapObj.hasImage?.(event.id)
+                    ) {
+                        return;
+                    }
+
+                    const canvas =
+                        document.createElement("canvas");
+
+                    canvas.width = 1;
+                    canvas.height = 1;
+
+                    const context =
+                        canvas.getContext("2d");
+
+                    if (!context) {
+                        return;
+                    }
+
+                    try {
+                        mapObj.addImage(
+                        event.id,
+                        context.getImageData(
+                            0,
+                            0,
+                            1,
+                            1,
+                        ),
+                        );
+                    } catch (error) {
+                        console.debug(
+                        "Não foi possível registrar imagem ausente.",
+                        event.id,
+                        error,
+                        );
+                    }
+                    };
+
+                    const hideIdentifyTooltip = (): void => {
+                    if (tooltip) {
+                        tooltip.style.display = "none";
+                        tooltip.innerHTML = "";
+                    }
+
+                    if (mapObj?.getCanvas()) {
+                        mapObj.getCanvas().style.cursor =
+                        isInfoMode ? "help" : "";
+                    }
+                    };
+
+                    const onIdentifyMouseMove = (
+                    event: any,
+                    ): void => {
+                    if (
+                        !isInfoMode
+                        || !mapObj
+                        || !tooltip
+                    ) {
+                        return;
+                    }
+
+                    let renderedFeatures: any[] = [];
+
+                    try {
+                        renderedFeatures =
+                        mapObj.queryRenderedFeatures(
+                            event.point,
+                        ) ?? [];
+                    } catch (error) {
+                        console.warn(
+                        "Não foi possível identificar feições.",
+                        error,
+                        );
+
+                        hideIdentifyTooltip();
+                        return;
+                    }
+
+                    const seen =
+                        new Set<string>();
+
+                    const identifiedFeatures =
+                        renderedFeatures
+                        .filter(isIdentifiableFeature)
+                        .filter((feature: any) => {
+                            const key =
+                            getFeatureKey(feature);
+
+                            if (seen.has(key)) {
+                            return false;
                             }
-                        });
-                        
-                        mapObj.on('mouseout', () => { tooltip!.style.display = 'none'; });
+
+                            seen.add(key);
+                            return true;
+                        })
+                        .slice(
+                            0,
+                            MAX_IDENTIFIED_FEATURES,
+                        );
+
+                    if (
+                        identifiedFeatures.length === 0
+                    ) {
+                        hideIdentifyTooltip();
+                        return;
                     }
 
-                    (wrap.querySelector("#toggleInfoMode") as HTMLInputElement).addEventListener("change", (e: any) => {
-                        isInfoMode = e.target.checked;
-                        if (!isInfoMode && tooltip) { tooltip.style.display = 'none'; }
-                        if(mapObj && mapObj.getCanvas()) { mapObj.getCanvas().style.cursor = isInfoMode ? 'help' : ''; }
-                    });
+                    tooltip.innerHTML =
+                        buildFeatureTooltipHtml(
+                        identifiedFeatures,
+                        );
+
+                    const originalEvent =
+                        event.originalEvent;
+
+                    const clientX =
+                        originalEvent?.clientX
+                        ?? originalEvent
+                        ?.touches?.[0]?.clientX
+                        ?? 0;
+
+                    const clientY =
+                        originalEvent?.clientY
+                        ?? originalEvent
+                        ?.touches?.[0]?.clientY
+                        ?? 0;
+
+                    const offset = 16;
+                    const margin = 12;
+
+                    tooltip.style.display = "block";
+
+                    const tooltipRect =
+                        tooltip.getBoundingClientRect();
+
+                    let left =
+                        clientX + offset;
+
+                    let top =
+                        clientY + offset;
+
+                    if (
+                        left + tooltipRect.width
+                        > window.innerWidth - margin
+                    ) {
+                        left =
+                        clientX
+                        - tooltipRect.width
+                        - offset;
+                    }
+
+                    if (
+                        top + tooltipRect.height
+                        > window.innerHeight - margin
+                    ) {
+                        top =
+                        window.innerHeight
+                        - tooltipRect.height
+                        - margin;
+                    }
+
+                    tooltip.style.left =
+                        `${Math.max(margin, left)}px`;
+
+                    tooltip.style.top =
+                        `${Math.max(margin, top)}px`;
+
+                    mapObj
+                        .getCanvas()
+                        .style.cursor = "crosshair";
+                    };
+
+                    const onIdentifyMouseOut = (): void => {
+                    hideIdentifyTooltip();
+                    };
+
+                    const onToggleInfoChange = (
+                    event: Event,
+                    ): void => {
+                    const checkbox = event.currentTarget as HTMLInputElement;
+                    isInfoMode = checkbox.checked;
+
+                    if (!isInfoMode) {
+                        hideIdentifyTooltip();
+                    }
+
+                    if (mapObj?.getCanvas()) {
+                        mapObj.getCanvas().style.cursor =
+                        isInfoMode ? "help" : "";
+                    }
+                    };
+
+                    cleanupIdentifyHandlers?.();
+
+                    mapObj?.on(
+                    "styleimagemissing",
+                    onStyleImageMissing,
+                    );
+
+                    mapObj?.on(
+                    "mousemove",
+                    onIdentifyMouseMove,
+                    );
+
+                    mapObj?.on(
+                    "mouseout",
+                    onIdentifyMouseOut,
+                    );
+
+                    toggleInfoMode.addEventListener(
+                    "change",
+                    onToggleInfoChange,
+                    );
+
+                    cleanupIdentifyHandlers = (): void => {
+                    try {
+                        mapObj?.off(
+                        "styleimagemissing",
+                        onStyleImageMissing,
+                        );
+
+                        mapObj?.off(
+                        "mousemove",
+                        onIdentifyMouseMove,
+                        );
+
+                        mapObj?.off(
+                        "mouseout",
+                        onIdentifyMouseOut,
+                        );
+
+                        toggleInfoMode.removeEventListener(
+                        "change",
+                        onToggleInfoChange,
+                        );
+                    } catch (error) {
+                        console.debug(
+                        "Falha não crítica ao remover handlers.",
+                        error,
+                        );
+                    }
+
+                    isInfoMode = false;
+                    hideIdentifyTooltip();
+
+                    cleanupIdentifyHandlers = null;
+                    };
 
                     let moveSyncHandler: any = null;
                     let onMouseMoveSwipe: any = null;
@@ -693,7 +1222,7 @@ export const plugin = {
                         } else {
                             const sDiv = document.getElementById('smart15-swipe-div'); if (sDiv) sDiv.remove();
                             const hDiv = document.getElementById('smart15-swipe-handle'); if (hDiv) hDiv.remove();
-                            mapContainer.querySelectorAll('.smart15-swipe-label').forEach(el => el.remove());
+                            mapContainer.querySelectorAll(".smart15-swipe-label").forEach((el: Element) => el.remove());
                             if (secondMapInstance) { (secondMapInstance as any).remove(); secondMapInstance = null; }
                             
                             if (moveSyncHandler) { mapObj.off('move', moveSyncHandler); moveSyncHandler = null; }
@@ -759,11 +1288,15 @@ export const plugin = {
                     const btnReset = wrap.querySelector("#btnReset") as HTMLButtonElement;
                     const areaCoords = wrap.querySelector("#areaCoords") as HTMLDivElement;
                     
-                    const sampleFileInput = wrap.querySelector("#sampleFileInput") as HTMLInputElement; 
-                    const sampleStatus = wrap.querySelector("#sampleStatus") as HTMLDivElement; 
+                    const sampleFileInput = wrap.querySelector("#sampleFileInput") as HTMLInputElement;
+                    const sampleStatus = wrap.querySelector("#sampleStatus") as HTMLDivElement;
                     const sampleCoords = wrap.querySelector("#sampleCoords") as HTMLDivElement;
+                    const basemapSelect = wrap.querySelector("#basemapSelect") as HTMLSelectElement;
+                    const drawSampleClass = wrap.querySelector("#drawSampleClass") as HTMLSelectElement;
+                    const btnDrawSample = wrap.querySelector("#btnDrawSample") as HTMLButtonElement;
 
                     const painelPosProcessamento = wrap.querySelector("#painelPosProcessamento") as HTMLDivElement;
+                    const btnGenerateReport = wrap.querySelector("#btnGenerateReport") as HTMLButtonElement;
                     const listaCamadasInput = wrap.querySelector("#listaCamadasInput") as HTMLDivElement;
                     const listaCamadas = wrap.querySelector("#listaCamadas") as HTMLDivElement;
                     const listaCamadasRasters = wrap.querySelector("#listaCamadasRasters") as HTMLDivElement;
@@ -979,7 +1512,122 @@ export const plugin = {
                         tools.appendChild(btnUp); tools.appendChild(btnDown); tools.appendChild(btnVis); row.appendChild(span); row.appendChild(tools); container.appendChild(row);
                     };
 
-                    const startDrawing = (mode: string) => {
+                    const removeSampleLayers = () => {
+                        const currentMap = getMapInstance(app);
+                        if (!currentMap) return;
+
+                        if (currentMap.getLayer(SAMPLE_LINE_LAYER_ID)) currentMap.removeLayer(SAMPLE_LINE_LAYER_ID);
+                        if (currentMap.getLayer(SAMPLE_FILL_LAYER_ID)) currentMap.removeLayer(SAMPLE_FILL_LAYER_ID);
+                        if (currentMap.getSource(SAMPLE_SOURCE_ID)) currentMap.removeSource(SAMPLE_SOURCE_ID);
+
+                        layersAtivos = layersAtivos.filter(
+                            (id) => id !== SAMPLE_FILL_LAYER_ID && id !== SAMPLE_LINE_LAYER_ID
+                        );
+                    };
+
+                    const renderSampleLayers = () => {
+                        const currentMap = getMapInstance(app);
+                        if (!currentMap || !amostrasGeoJSON) return;
+
+                        const source = currentMap.getSource(SAMPLE_SOURCE_ID);
+                        if (source && typeof source.setData === "function") {
+                            source.setData(amostrasGeoJSON);
+                        } else {
+                            currentMap.addSource(SAMPLE_SOURCE_ID, {
+                                type: "geojson",
+                                data: amostrasGeoJSON
+                            });
+                        }
+
+                        const colorExpression = [
+                            "match",
+                            ["get", "classe"],
+                            1, "#4a5568",
+                            2, "#a0aec0",
+                            3, "#c05621",
+                            4, "#2f855a",
+                            5, "#68d391",
+                            6, "#d69e2e",
+                            "#805ad5"
+                        ];
+
+                        if (!currentMap.getLayer(SAMPLE_FILL_LAYER_ID)) {
+                            currentMap.addLayer({
+                                id: SAMPLE_FILL_LAYER_ID,
+                                type: "fill",
+                                source: SAMPLE_SOURCE_ID,
+                                paint: {
+                                    "fill-color": colorExpression,
+                                    "fill-opacity": 0.42
+                                }
+                            });
+                            layersAtivos.push(SAMPLE_FILL_LAYER_ID);
+                            appendLayerToggle(SAMPLE_FILL_LAYER_ID, "Amostras IA", listaCamadasInput);
+                        }
+
+                        if (!currentMap.getLayer(SAMPLE_LINE_LAYER_ID)) {
+                            currentMap.addLayer({
+                                id: SAMPLE_LINE_LAYER_ID,
+                                type: "line",
+                                source: SAMPLE_SOURCE_ID,
+                                paint: {
+                                    "line-color": colorExpression,
+                                    "line-width": 2
+                                }
+                            });
+                            layersAtivos.push(SAMPLE_LINE_LAYER_ID);
+                        }
+                    };
+
+                    const setSatelliteVisibility = (visible: boolean) => {
+                        const currentMap = getMapInstance(app);
+                        if (!currentMap) return;
+
+                        if (!currentMap.getSource(SATELLITE_SOURCE_ID)) {
+                            currentMap.addSource(SATELLITE_SOURCE_ID, {
+                                type: "raster",
+                                tiles: [
+                                    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                                ],
+                                tileSize: 256,
+                                attribution: "Esri"
+                            });
+                        }
+
+                        if (!currentMap.getLayer(SATELLITE_LAYER_ID)) {
+                            const firstOverlayLayer = currentMap
+                                .getStyle()
+                                .layers
+                                ?.find((layer: any) =>
+                                    layer.id.startsWith("smart15-") &&
+                                    layer.id !== SATELLITE_LAYER_ID
+                                );
+
+                            currentMap.addLayer(
+                                {
+                                    id: SATELLITE_LAYER_ID,
+                                    type: "raster",
+                                    source: SATELLITE_SOURCE_ID,
+                                    layout: {
+                                        visibility: visible ? "visible" : "none"
+                                    }
+                                },
+                                firstOverlayLayer?.id
+                            );
+                        } else {
+                            currentMap.setLayoutProperty(
+                                SATELLITE_LAYER_ID,
+                                "visibility",
+                                visible ? "visible" : "none"
+                            );
+                        }
+                    };
+
+                    basemapSelect.addEventListener("change", () => {
+                        setSatelliteVisibility(basemapSelect.value === "satellite");
+                    });
+
+                    const startDrawing = (mode: string, isSample = false) => {
                         if (isDrawingMode) return; isDrawingMode = true;
                         const mapCanvas = document.querySelector(".maplibregl-canvas"); const mapContainer = mapCanvas ? mapCanvas.parentElement : null;
                         const mapObj = getMapInstance(app);
@@ -992,15 +1640,41 @@ export const plugin = {
                         const getPos = (e: any) => { const r = overlay.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
 
                         const finishDrawing = () => {
-                            overlay.remove(); if (mapObj && mapObj.dragPan) mapObj.dragPan.enable(); isDrawingMode = false;
-                            if (geometriaGeoJSON && bboxCapturada) {
-                                areaStatus.innerHTML = SVG_ICONS.SUCCESS + " Capturado!"; areaStatus.style.color = "#2f855a";
+                            overlay.remove();
+                            if (mapObj && mapObj.dragPan) mapObj.dragPan.enable();
+                            isDrawingMode = false;
+
+                            if (!isSample && geometriaGeoJSON && bboxCapturada) {
+                                areaStatus.innerHTML = SVG_ICONS.SUCCESS + " Capturado!";
+                                areaStatus.style.color = "#2f855a";
                                 areaCoords.innerText = "BBox: [" + bboxCapturada[0].toFixed(4) + ", " + bboxCapturada[1].toFixed(4) + ", " + bboxCapturada[2].toFixed(4) + ", " + bboxCapturada[3].toFixed(4) + "]";
-                                const sourceId = 'smart15-input-area';
-                                if (!mapObj.getSource(sourceId)) { mapObj.addSource(sourceId, { type: 'geojson', data: geometriaGeoJSON }); } else { mapObj.getSource(sourceId).setData(geometriaGeoJSON); }
-                                if (!mapObj.getLayer(sourceId+'-fill')) { mapObj.addLayer({ id: sourceId+'-fill', type: 'fill', source: sourceId, paint: { 'fill-color': corArea.value, 'fill-opacity': 0.1 } }); layersAtivos.push(sourceId+'-fill'); }
-                                if (!mapObj.getLayer(sourceId+'-line')) { mapObj.addLayer({ id: sourceId+'-line', type: 'line', source: sourceId, paint: { 'line-color': corArea.value, 'line-width': 2, 'line-opacity': 0 } }); layersAtivos.push(sourceId+'-line'); }
-                                painelPosProcessamento.style.display = "block"; appendLayerToggle(sourceId+'-fill', "Área Geográfica (Base)", listaCamadasInput); updateLayerStyle();
+                                const sourceId = "smart15-input-area";
+                                if (!mapObj.getSource(sourceId)) {
+                                    mapObj.addSource(sourceId, { type: "geojson", data: geometriaGeoJSON });
+                                } else {
+                                    mapObj.getSource(sourceId).setData(geometriaGeoJSON);
+                                }
+                                if (!mapObj.getLayer(sourceId + "-fill")) {
+                                    mapObj.addLayer({
+                                        id: sourceId + "-fill",
+                                        type: "fill",
+                                        source: sourceId,
+                                        paint: { "fill-color": corArea.value, "fill-opacity": 0.1 }
+                                    });
+                                    layersAtivos.push(sourceId + "-fill");
+                                }
+                                if (!mapObj.getLayer(sourceId + "-line")) {
+                                    mapObj.addLayer({
+                                        id: sourceId + "-line",
+                                        type: "line",
+                                        source: sourceId,
+                                        paint: { "line-color": corArea.value, "line-width": 2, "line-opacity": 0 }
+                                    });
+                                    layersAtivos.push(sourceId + "-line");
+                                }
+                                painelPosProcessamento.style.display = "block";
+                                appendLayerToggle(sourceId + "-fill", "Área Geográfica (Base)", listaCamadasInput);
+                                updateLayerStyle();
                             }
                         };
 
@@ -1011,7 +1685,14 @@ export const plugin = {
                             const onUp = (ev: any) => { ev.preventDefault(); if (!isDrawing) return; isDrawing = false; window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); const end = getPos(ev); if (Math.abs(end.x - start.x) > 10) { const nw = mapObj.unproject([Math.min(start.x, end.x), Math.min(start.y, end.y)]); const se = mapObj.unproject([Math.max(start.x, end.x), Math.max(start.y, end.y)]); bboxCapturada = [Math.min(nw.lng, se.lng), Math.min(nw.lat, se.lat), Math.max(nw.lng, se.lng), Math.max(nw.lat, se.lat)]; geometriaGeoJSON = { type: "Feature", geometry: { type: "Polygon", coordinates: [[[nw.lng, nw.lat], [se.lng, nw.lat], [se.lng, se.lat], [nw.lng, se.lat], [nw.lng, nw.lat]]] } }; } finishDrawing(); };
                             overlay.addEventListener("pointerdown", (e: any) => { e.preventDefault(); isDrawing = true; start = getPos(e); rectEl = document.createElementNS("http://www.w3.org/2000/svg", "rect"); rectEl.setAttribute("fill", "rgba(49, 130, 206, 0.2)"); rectEl.setAttribute("stroke", "#3182ce"); rectEl.setAttribute("stroke-width", "2"); svg.appendChild(rectEl); window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp); });
                         } else if (mode === "poly") {
-                            areaStatus.innerText = "Clique no mapa. DIREITO para fechar."; areaCoords.innerText = "";
+                            if (isSample) {
+                                sampleStatus.innerText = "Clique no mapa. Use o botão direito para fechar a amostra.";
+                                sampleStatus.style.color = "#2b6cb0";
+                                sampleCoords.innerText = "";
+                            } else {
+                                areaStatus.innerText = "Clique no mapa. DIREITO para fechar.";
+                                areaCoords.innerText = "";
+                            }
                             let polyEl = document.createElementNS('http://www.w3.org/2000/svg', 'polygon'); polyEl.setAttribute('fill', 'rgba(49, 130, 206, 0.15)'); polyEl.setAttribute('stroke', '#2b6cb0'); polyEl.setAttribute('stroke-width', '2'); svg.appendChild(polyEl);
                             let guideLineEl = document.createElementNS('http://www.w3.org/2000/svg', 'polyline'); guideLineEl.setAttribute('fill', 'none'); guideLineEl.setAttribute('stroke', '#2b6cb0'); guideLineEl.setAttribute('stroke-width', '1'); guideLineEl.setAttribute('stroke-dasharray', '4,4'); svg.appendChild(guideLineEl);
                             let ptsTela: any[] = []; let coordsGeo: any[] = [];
@@ -1019,8 +1700,77 @@ export const plugin = {
                             overlay.addEventListener("pointerdown", (e: any) => {
                                 e.preventDefault(); const pos = getPos(e);
                                 if (e.button === 2) {
-                                    if (coordsGeo.length >= 3) { coordsGeo.push([coordsGeo[0][0], coordsGeo[0][1]]); geometriaGeoJSON = { type: "Feature", geometry: { type: "Polygon", coordinates: [coordsGeo] } }; const lons = coordsGeo.map(c => c[0]), lats = coordsGeo.map(c => c[1]); bboxCapturada = [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)]; }
-                                    window.removeEventListener("pointermove", onMove); finishDrawing(); return;
+                                    if (coordsGeo.length >= 3) {
+                                        coordsGeo.push([coordsGeo[0][0], coordsGeo[0][1]]);
+
+                                        if (isSample) {
+                                            const classe = Number(drawSampleClass.value);
+                                            const classeNome = SAMPLE_CLASSES[classe];
+
+                                            if (!classeNome) {
+                                                sampleStatus.innerHTML = SVG_ICONS.WARN + " Classe de amostra inválida.";
+                                                sampleStatus.style.color = "#e53e3e";
+                                            } else {
+                                                if (!amostrasGeoJSON) {
+                                                    amostrasGeoJSON = {
+                                                        type: "FeatureCollection",
+                                                        features: []
+                                                    };
+                                                }
+
+                                                amostrasGeoJSON.features.push({
+                                                    type: "Feature",
+                                                    properties: {
+                                                        classe,
+                                                        classe_nome: classeNome
+                                                    },
+                                                    geometry: {
+                                                        type: "Polygon",
+                                                        coordinates: [coordsGeo]
+                                                    }
+                                                });
+
+                                                renderSampleLayers();
+
+                                                sampleStatus.innerHTML =
+                                                    SVG_ICONS.SUCCESS +
+                                                    " " +
+                                                    amostrasGeoJSON.features.length +
+                                                    " amostra(s) em memória.";
+                                                sampleStatus.style.color = "#2f855a";
+                                                sampleCoords.innerText =
+                                                    "Última classe: " +
+                                                    classe +
+                                                    " - " +
+                                                    classeNome;
+                                            }
+                                        } else {
+                                            geometriaGeoJSON = {
+                                                type: "Feature",
+                                                geometry: {
+                                                    type: "Polygon",
+                                                    coordinates: [coordsGeo]
+                                                }
+                                            };
+                                            const lons = coordsGeo.map((c) => c[0]);
+                                            const lats = coordsGeo.map((c) => c[1]);
+                                            bboxCapturada = [
+                                                Math.min(...lons),
+                                                Math.min(...lats),
+                                                Math.max(...lons),
+                                                Math.max(...lats)
+                                            ];
+                                        }
+                                    } else if (isSample) {
+                                        sampleStatus.innerHTML =
+                                            SVG_ICONS.WARN +
+                                            " A amostra precisa de pelo menos três pontos.";
+                                        sampleStatus.style.color = "#e53e3e";
+                                    }
+
+                                    window.removeEventListener("pointermove", onMove);
+                                    finishDrawing();
+                                    return;
                                 }
                                 if (e.button === 0) { const lngLat = mapObj.unproject([pos.x, pos.y]); ptsTela.push(pos); coordsGeo.push([lngLat.lng, lngLat.lat]); polyEl.setAttribute('points', ptsTela.map(p => p.x + "," + p.y).join(' ')); }
                             });
@@ -1043,12 +1793,17 @@ export const plugin = {
                         }
                     };
 
-                    (wrap.querySelector("#btnDrawRect") as HTMLButtonElement).addEventListener("click", () => startDrawing("rect"));
-                    (wrap.querySelector("#btnDrawPoly") as HTMLButtonElement).addEventListener("click", () => startDrawing("poly"));
-                    (wrap.querySelector("#btnDrawCircle") as HTMLButtonElement).addEventListener("click", () => startDrawing("circle"));
+                    (wrap.querySelector("#btnDrawRect") as HTMLButtonElement).addEventListener("click", () => startDrawing("rect", false));
+                    (wrap.querySelector("#btnDrawPoly") as HTMLButtonElement).addEventListener("click", () => startDrawing("poly", false));
+                    (wrap.querySelector("#btnDrawCircle") as HTMLButtonElement).addEventListener("click", () => startDrawing("circle", false));
+                    btnDrawSample.addEventListener("click", () => startDrawing("poly", true));
 
                     btnReset.addEventListener("click", () => {
                         const mapObj = getMapInstance(app);
+                        removeSampleLayers();
+                        setSatelliteVisibility(false);
+                        basemapSelect.value = "default";
+
                         if (mapObj) { 
                             if (mapObj.getLayer('smart15-mask-layer')) mapObj.removeLayer('smart15-mask-layer');
                             if (mapObj.getSource('smart15-mask-src')) mapObj.removeSource('smart15-mask-src');
@@ -1058,9 +1813,17 @@ export const plugin = {
                         
                         layersAtivos = []; geometriaGeoJSON = null; amostrasGeoJSON = null; maskDataGeoJSON = null; bboxCapturada = null; downloadUrlZip = null; isDrawingMode = false; 
                         painelPosProcessamento.style.display = "none"; listaCamadasInput.innerHTML = ""; listaCamadas.innerHTML = ""; listaCamadasRasters.innerHTML = ""; 
-                        
+                        ultimoResultadoSimulacao = null;
+                        ultimaConfiguracaoSimulacao = null;
+                        ultimaCapturaMapa = null;
+
+                        btnGenerateReport.style.display = "none";
+                        btnGenerateReport.disabled = true;
                         areaStatus.innerText = "Nenhum limite definido."; areaCoords.innerText = ""; 
-                        sampleStatus.innerHTML = "Nenhuma amostra carregada"; sampleStatus.style.color = "#4a5568"; sampleCoords.innerText = "";
+                        sampleStatus.innerHTML = "Nenhuma amostra desenhada ou carregada";
+                        sampleStatus.style.color = "#4a5568";
+                        sampleCoords.innerText = "";
+                        sampleFileInput.value = "";
                         (wrap.querySelector("#rasterLegendsContainer") as HTMLDivElement).style.display = "none";
                         
                         clearInterval((window as any).simProgressInterval); (wrap.querySelector("#progressContainer") as HTMLDivElement).style.display = "none";
@@ -1093,44 +1856,146 @@ export const plugin = {
                         }
                     });
 
-                    (wrap.querySelector("#btnUploadSamples") as HTMLButtonElement).addEventListener("click", (e: any) => { e.preventDefault(); sampleFileInput.click(); });
+                    (wrap.querySelector("#btnUploadSamples") as HTMLButtonElement).addEventListener("click", (e: any) => {
+                        e.preventDefault();
+                        sampleFileInput.click();
+                    });
+
                     sampleFileInput.addEventListener("change", (e: any) => {
-                        const file = e.target.files[0]; if (file) {
-                            
-                            sampleStatus.innerHTML = SVG_ICONS.LOAD + " Lendo amostras...";
-                            sampleStatus.style.color = "#d69e2e";
-                            
-                            const reader = new FileReader(); reader.onload = (ev: any) => { try {
-                                amostrasGeoJSON = JSON.parse(ev.target.result);
-                                const b = calculateBBox(amostrasGeoJSON);
-                                if(b) sampleCoords.innerText = "BBox: [" + b[0][0].toFixed(4) + ", " + b[0][1].toFixed(4) + ", " + b[1][0].toFixed(4) + ", " + b[1][1].toFixed(4) + "]";
-                                
-                                const mapObj = getMapInstance(app); 
-                                if(mapObj) {
-                                    const sId = 'smart15-input-samples'; 
-                                    if(!mapObj.getSource(sId)) mapObj.addSource(sId, {type:'geojson', data:amostrasGeoJSON}); 
-                                    else mapObj.getSource(sId).setData(amostrasGeoJSON);
-                                    
-                                    const isPolygon = amostrasGeoJSON.features && amostrasGeoJSON.features[0] && (amostrasGeoJSON.features[0].geometry.type.includes('Polygon'));
-                                    
-                                    if(isPolygon) {
-                                        if(!mapObj.getLayer(sId+'-fill')) { mapObj.addLayer({id:sId+'-fill', type:'fill', source:sId, paint:{'fill-color':corOsm.value, 'fill-opacity':contornoOsm.checked ? 0 : (parseInt(opacOsm.value)/100)}}); layersAtivos.push(sId+'-fill'); }
-                                        if(!mapObj.getLayer(sId+'-line')) { mapObj.addLayer({id:sId+'-line', type:'line', source:sId, paint:{'line-color':corOsm.value, 'line-width':contornoOsm.checked ? 2 : 0}}); layersAtivos.push(sId+'-line'); }
-                                        appendLayerToggle(sId+'-fill', "Amostras", listaCamadasInput);
-                                    } else {
-                                        if(!mapObj.getLayer(sId+'-circle')) { mapObj.addLayer({id:sId+'-circle', type:'circle', source:sId, paint:{'circle-radius':5, 'circle-color':corOsm.value, 'circle-opacity':contornoOsm.checked ? 0 : (parseInt(opacOsm.value)/100), 'circle-stroke-width': contornoOsm.checked ? 2 : 0, 'circle-stroke-color': corOsm.value}}); layersAtivos.push(sId+'-circle'); }
-                                        appendLayerToggle(sId+'-circle', "Amostras", listaCamadasInput);
-                                    }
-                                    updateLayerStyle();
-                                    
-                                    sampleStatus.innerHTML = SVG_ICONS.SUCCESS + " " + file.name; 
-                                    sampleStatus.style.color = "#2f855a";
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+
+                        sampleStatus.innerHTML = SVG_ICONS.LOAD + " Lendo amostras...";
+                        sampleStatus.style.color = "#d69e2e";
+
+                        const reader = new FileReader();
+
+                        reader.onload = (ev: any) => {
+                            try {
+                                const rawText = String(ev.target?.result ?? "")
+                                    .replace(/^\uFEFF/, "")
+                                    .trim();
+
+                                const parsed = JSON.parse(rawText);
+
+                                if (
+                                    parsed?.type !== "FeatureCollection" ||
+                                    !Array.isArray(parsed.features)
+                                ) {
+                                    throw new Error("O arquivo não é um FeatureCollection válido.");
                                 }
-                            } catch(e) {
-                                sampleStatus.innerHTML = SVG_ICONS.WARN + " Erro ao ler GeoJSON";
+
+                                const normalizedFeatures: SamplePolygonFeature[] =
+                                    parsed.features.map((feature: any, index: number) => {
+                                        if (
+                                            feature?.type !== "Feature" ||
+                                            feature?.geometry?.type !== "Polygon"
+                                        ) {
+                                            throw new Error(
+                                                `A feição ${index + 1} não é um polígono válido.`
+                                            );
+                                        }
+
+                                        const rawClass =
+                                        feature.properties?.classe
+                                        ?? feature.properties?.class;
+
+                                        const normalizeClassName = (value: unknown): string =>
+                                        String(value ?? "")
+                                            .trim()
+                                            .normalize("NFD")
+                                            .replace(/\p{Diacritic}/gu, "")
+                                            .toLowerCase();
+
+                                        const numericClass = Number(rawClass);
+
+                                        const classEntry = Object.entries(SAMPLE_CLASSES)
+                                        .find(([, className]) =>
+                                            normalizeClassName(className)
+                                            === normalizeClassName(rawClass),
+                                        );
+
+                                        const classe = Number.isInteger(numericClass)
+                                        ? numericClass
+                                        : Number(classEntry?.[0]);
+
+                                        if (
+                                        !Number.isInteger(classe)
+                                        || SAMPLE_CLASSES[classe] === undefined
+                                        ) {
+                                        throw new Error(
+                                            `A feição ${index + 1} possui classe inválida: ${String(rawClass)}.`,
+                                        );
+                                        }
+
+                                        const classeNome =
+                                        SAMPLE_CLASSES[classe]
+                                        ?? feature.properties?.classe_nome;
+
+                                        return {
+                                            type: "Feature",
+                                            properties: {
+                                                classe,
+                                                classe_nome: classeNome
+                                            },
+                                            geometry: {
+                                                type: "Polygon",
+                                                coordinates: feature.geometry.coordinates
+                                            }
+                                        };
+                                    });
+
+                                amostrasGeoJSON = {
+                                    type: "FeatureCollection",
+                                    features: normalizedFeatures
+                                };
+
+                                renderSampleLayers();
+
+                                const bbox = calculateBBox(amostrasGeoJSON);
+                                if (bbox) {
+                                    sampleCoords.innerText =
+                                        "BBox: [" +
+                                        bbox[0][0].toFixed(4) +
+                                        ", " +
+                                        bbox[0][1].toFixed(4) +
+                                        ", " +
+                                        bbox[1][0].toFixed(4) +
+                                        ", " +
+                                        bbox[1][1].toFixed(4) +
+                                        "]";
+                                }
+
+                                sampleStatus.innerHTML =
+                                    SVG_ICONS.SUCCESS +
+                                    " " +
+                                    amostrasGeoJSON.features.length +
+                                    " amostra(s) carregada(s) de " +
+                                    file.name;
+                                sampleStatus.style.color = "#2f855a";
+                            } catch (error) {
+                                console.error(
+                                    "[Smart15] Erro ao carregar amostras:",
+                                    error
+                                );
+                                sampleStatus.innerHTML =
+                                    SVG_ICONS.WARN +
+                                    " Erro ao ler o GeoJSON de amostras.";
                                 sampleStatus.style.color = "#e53e3e";
-                            } }; reader.readAsText(file);
-                        }
+                            } finally {
+                                sampleFileInput.value = "";
+                            }
+                        };
+
+                        reader.onerror = () => {
+                            sampleStatus.innerHTML =
+                                SVG_ICONS.WARN +
+                                " Falha durante a leitura do arquivo.";
+                            sampleStatus.style.color = "#e53e3e";
+                            sampleFileInput.value = "";
+                        };
+
+                        reader.readAsText(file);
                     });
 
                     (wrap.querySelector("#btnExportResult") as HTMLButtonElement).addEventListener("click", async () => {
@@ -1163,6 +2028,115 @@ export const plugin = {
 
                     (window as any).simProgressInterval = null;
 
+                    btnGenerateReport.addEventListener(
+                      "click",
+                      async () => {
+                        if (!ultimoResultadoSimulacao) {
+                          alert(
+                            "Execute uma simulação antes de gerar o relatório."
+                          );
+
+                          return;
+                        }
+
+                        if (!ultimoResultadoSimulacao.report) {
+                          alert(
+                            "O backend não retornou os dados técnicos do relatório."
+                          );
+
+                          console.error(
+                            "Resultado recebido:",
+                            ultimoResultadoSimulacao,
+                          );
+
+                          return;
+                        }
+
+                        try {
+                          btnGenerateReport.disabled = true;
+                          btnGenerateReport.innerText =
+                            "GERANDO RELATÓRIO...";
+
+                          const captureResult =
+                            captureMapAsDataUrl(
+                              getMapInstance(app),
+                            );
+
+                            ultimaCapturaMapa =
+                            captureResult.dataUrl;
+
+                          if (captureResult.error) {
+                            console.warn(
+                              captureResult.error,
+                            );
+                          }
+
+                          const reportData =
+                            await adaptSimulationToReport({
+                              simulation: ultimoResultadoSimulacao,
+                              configuration:
+                                ultimaConfiguracaoSimulacao,
+                              mapImage: ultimaCapturaMapa,
+                              studyGeometry:
+                                geometriaGeoJSON,
+                            });
+
+                            console.group(
+                            "Smart15 — dados adaptados para impressão",
+                            );
+
+                            console.log(
+                            "Simulation:",
+                            ultimoResultadoSimulacao,
+                            );
+
+                            console.log(
+                            "Configuration:",
+                            ultimaConfiguracaoSimulacao,
+                            );
+
+                            console.log(
+                            "ReportData final:",
+                            reportData,
+                            );
+
+                            console.groupEnd();
+
+                          openPrintableReport(reportData);
+                        } catch (error) {
+                          console.error(
+                            "Erro ao gerar relatório:",
+                            error,
+                          );
+
+                          alert(
+                            "Não foi possível gerar o relatório técnico."
+                          );
+                        } finally {
+                          btnGenerateReport.disabled = false;
+                          btnGenerateReport.innerHTML = `
+                            <strong
+                              style="
+                                color: inherit;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                              "
+                            >
+                              <svg
+                                viewBox="0 0 24 24"
+                                class="s15-icon s15-icon-btn"
+                              >
+                                <use href="#icon-book"/>
+                              </svg>
+
+                              GERAR RELATÓRIO TÉCNICO
+                            </strong>
+                          `;
+                        }
+                      },
+                    );
+
                     (wrap.querySelector("#btnSimular") as HTMLButtonElement).addEventListener("click", async () => {
                         if (!geometriaGeoJSON) { alert("Defina a Área de Estudo primeiro."); return; }
                         const btnSimular = wrap.querySelector("#btnSimular") as HTMLButtonElement; btnSimular.innerText = "PROCESSANDO..."; btnSimular.disabled = true;
@@ -1189,7 +2163,16 @@ export const plugin = {
                                 visualizacao: { extrusao_3d: (wrap.querySelector("#extrusao3d") as HTMLInputElement).checked },
                                 modo_temp: (wrap.querySelector("#modoTemp") as HTMLSelectElement).value,
                                 modo_veg: (wrap.querySelector("#modoVeg") as HTMLSelectElement).value,
-                                modo_dem: (wrap.querySelector("#modoDem") as HTMLSelectElement).value
+                                modo_dem: (wrap.querySelector("#modoDem") as HTMLSelectElement).value,
+                                pluginVersion: "2.0.0",
+                                tempo_alvo: 15,
+
+                                dataSources: [
+                                    "OpenStreetMap",
+                                    "Copernicus DEM",
+                                    "Sentinel-2",
+                                    "Planetary Computer",
+                                ],
                             };
 
                             const formData = new FormData(); formData.append("dados", JSON.stringify(pData));
@@ -1199,13 +2182,92 @@ export const plugin = {
                             if(pData.modo_temp === 'manual' && fileTempInput.files && fileTempInput.files[0]) formData.append("file_temp", fileTempInput.files[0]);
                             const fileDemInput = wrap.querySelector("#fileDem") as HTMLInputElement;
                             if(pData.modo_dem === 'manual' && fileDemInput.files && fileDemInput.files[0]) formData.append("file_dem", fileDemInput.files[0]);
-                            if(amostrasGeoJSON) formData.append("file_samples", new Blob([JSON.stringify(amostrasGeoJSON)], {type:'application/json'}));
+                            if (amostrasGeoJSON && amostrasGeoJSON.features.length > 0) {
+                                formData.append(
+                                    "file_samples",
+                                    new Blob(
+                                        [JSON.stringify(amostrasGeoJSON)],
+                                        { type: "application/geo+json" }
+                                    ),
+                                    "amostras.geojson"
+                                );
+                            }
 
-                            const res = await fetch("/api/simular", { method: "POST", body: formData }).then(r=>r.json());
+                            const response = await fetch(
+                              "/api/simular",
+                              {
+                                method: "POST",
+                                body: formData,
+                              },
+                            );
+
+                            if (!response.ok) {
+                              throw new Error(
+                                `Falha HTTP ${response.status}`
+                              );
+                            }
+
+                            const res = await response.json();
+
+                            if (res.status !== "sucesso" || !res.data) {
+                              throw new Error(
+                                res.mensagem
+                                || "A simulação não retornou dados válidos."
+                              );
+                            }
+
+                            ultimoResultadoSimulacao = res.data;
+                            ultimaConfiguracaoSimulacao = pData;
+
+                            console.group(
+                            "Smart15 — diagnóstico do relatório",
+                            );
+
+                            console.log(
+                            "Configuração enviada:",
+                            pData,
+                            );
+
+                            console.log(
+                            "Resposta completa:",
+                            res.data,
+                            );
+
+                            console.log(
+                            "Report retornado pelo backend:",
+                            res.data.report,
+                            );
+
+                            console.log(
+                            "Simulações retornadas:",
+                            res.data.simulacoes,
+                            );
+
+                            console.groupEnd();
+
+                            btnGenerateReport.style.display =
+                              res.data.report
+                                ? "flex"
+                                : "none";
+
+                            btnGenerateReport.disabled =
+                              !res.data.report;
+                            //let ultimoResultadoSimulacao: any = null;
                             clearInterval((window as any).simProgressInterval); progressValue=90; progressBar.style.width="90%"; progressText.innerText="90%"; progressLabel.innerHTML = SVG_ICONS.SUCCESS + " Desenhando na Tela...";
 
                             if (res.data) {
                                 downloadUrlZip = res.data.download_url; maskDataGeoJSON = res.data.mask_geojson;
+                                if (res.data.report) {
+                                  btnGenerateReport.style.display = "flex";
+                                  btnGenerateReport.disabled = false;
+                                } else {
+                                  btnGenerateReport.style.display = "none";
+
+                                  console.warn(
+                                    "A resposta da simulação não contém data.report.",
+                                    res.data,
+                                  );
+                                }
                                 const mapObj = getMapInstance(app); painelPosProcessamento.style.display = "block"; listaCamadas.innerHTML = ""; listaCamadasRasters.innerHTML = "";
                                 const rasterLegends = wrap.querySelector("#rasterLegendsContainer") as HTMLDivElement;
                                 rasterLegends.innerHTML = `<b style="display: block; margin-bottom: 6px;">Valores Exatos dos Rasters (Mín / Máx):</b>`;
@@ -1273,15 +2335,61 @@ export const plugin = {
                         finally { btnSimular.innerText = "Executar Simulação Urbana"; btnSimular.disabled = false; }
                     });
 
-                    return () => wrap.remove();
+                    return () => {
+                        cleanupIdentifyHandlers?.();
+
+                        const existingTooltip =
+                            document.getElementById("smart15-tooltip");
+
+                        existingTooltip?.remove();
+
+                        wrap.remove();
+                        };
                 }
             });
             app.openRightPanel?.("smart15-workbench");
 		}
     },
     deactivate(app: any) {
-        const mapObj = getMapInstance(app); if (mapObj) { layersAtivos.forEach(id => { try { if(mapObj.getLayer(id)) mapObj.removeLayer(id); } catch(e){} }); layersAtivos.forEach(id => { const sId = id.replace('-line','').replace('-fill','').replace('-circle','').replace('-layer','').replace('-stroke','').replace('-grid',''); try { if(mapObj.getSource(sId)) mapObj.removeSource(sId); } catch(e){} }); }
-        layersAtivos = []; app.closeRightPanel?.("smart15-workbench");
+        cleanupIdentifyHandlers?.();
+        const mapObj = getMapInstance(app);
+        if (mapObj) {
+            layersAtivos.forEach((id) => {
+                try {
+                    if (mapObj.getLayer(id)) mapObj.removeLayer(id);
+                } catch (error) {}
+            });
+
+            layersAtivos.forEach((id) => {
+                const sourceId = id
+                    .replace("-line", "")
+                    .replace("-fill", "")
+                    .replace("-circle", "")
+                    .replace("-layer", "")
+                    .replace("-stroke", "")
+                    .replace("-grid", "");
+                try {
+                    if (mapObj.getSource(sourceId)) mapObj.removeSource(sourceId);
+                } catch (error) {}
+            });
+
+            if (mapObj.getLayer(SAMPLE_LINE_LAYER_ID)) mapObj.removeLayer(SAMPLE_LINE_LAYER_ID);
+            if (mapObj.getLayer(SAMPLE_FILL_LAYER_ID)) mapObj.removeLayer(SAMPLE_FILL_LAYER_ID);
+            if (mapObj.getSource(SAMPLE_SOURCE_ID)) mapObj.removeSource(SAMPLE_SOURCE_ID);
+
+            if (mapObj.getLayer(SATELLITE_LAYER_ID)) mapObj.removeLayer(SATELLITE_LAYER_ID);
+            if (mapObj.getSource(SATELLITE_SOURCE_ID)) mapObj.removeSource(SATELLITE_SOURCE_ID);
+
+            mapObj.getContainer()
+                ?.querySelectorAll(".smart15-draw-overlay")
+                .forEach((element: Element) => element.remove());
+
+            if (mapObj.dragPan) mapObj.dragPan.enable();
+        }
+
+        amostrasGeoJSON = null;
+        layersAtivos = [];
+        app.closeRightPanel?.("smart15-workbench");
         const tooltip = document.getElementById('smart15-tooltip'); if(tooltip) tooltip.remove();
         const swipeDiv = document.getElementById('smart15-swipe-div'); if(swipeDiv) swipeDiv.remove();
         const swipeHandle = document.getElementById('smart15-swipe-handle'); if(swipeHandle) swipeHandle.remove();
