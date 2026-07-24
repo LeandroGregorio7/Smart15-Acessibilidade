@@ -83,13 +83,23 @@ log "Plugin sincronizado com sucesso:"
 
 echo
 echo "====================================================="
-echo "Plugin sincronizado."
+echo "Smart15 Plugin"
+echo "====================================================="
+echo "✓ Build concluído"
+echo "✓ Manifesto atualizado"
+echo "✓ Bundle sincronizado"
 echo
-echo "Se o GeoLibre bloquear o plugin atualizado:"
+echo "Destino:"
+echo "  $DESTINATION_DIR"
 echo
-echo "localStorage.removeItem('geolibre.pluginBundlePins')"
+echo "Caso o GeoLibre não carregue a versão atualizada do plugin, é necessário limpar o cache de bundles:"
 echo
-echo "e recarregue a página."
+echo "  1. Abra o console do navegador (F12)."
+echo "  2. Execute:"
+echo
+echo "     localStorage.removeItem('geolibre.pluginBundlePins')"
+echo
+echo "  3. Recarregue a página (Ctrl+Shift+R)."
 echo "====================================================="
 find "$DESTINATION_DIR" \
   -maxdepth 3 \
