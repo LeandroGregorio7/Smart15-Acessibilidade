@@ -92,7 +92,7 @@ function analyzeTreeCoverage(
   if (coverage >= 70) {
     return {
       factor: "treeCoverage",
-      label: "Arborização",
+      label: "Cobertura arbórea estimada",
       rawValue: coverage,
       unit: "%",
       level: "positive",
@@ -110,7 +110,7 @@ function analyzeTreeCoverage(
   if (coverage >= 40) {
     return {
       factor: "treeCoverage",
-      label: "Arborização",
+      label: "Cobertura arbórea estimada",
       rawValue: coverage,
       unit: "%",
       level: "moderate",
@@ -127,12 +127,13 @@ function analyzeTreeCoverage(
 
   return {
     factor: "treeCoverage",
-    label: "Arborização",
+    label: "Cobertura arbórea estimada",
     rawValue: coverage,
     unit: "%",
     level: coverage < 20 ? "critical" : "high",
     description:
-      `A cobertura arbórea estimada foi de apenas ${coverage.toFixed(1)}%. `
+      `A cobertura arbórea estimada foi de apenas ${coverage.toFixed(1)}%, `
+      + "conforme classificação automatizada da imagem utilizada na simulação."
       + "A baixa disponibilidade de sombra pode reduzir o conforto do pedestre, "
       + "principalmente em períodos de maior temperatura.",
     recommendations: [

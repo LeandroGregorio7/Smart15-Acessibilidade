@@ -107,6 +107,33 @@ def calculate_numeric_stats(values):
         "quantidade_amostras": int(valid.size),
     }
 
+def calculate_land_cover_percentages(
+    predictions,
+    valid_mask,
+    tree_class_ids,
+    grass_class_ids,
+):
+    valid_predictions = predictions[valid_mask]
+
+    if valid_predictions.size == 0:
+        return None
+
+    tree_pixels = np.isin(valid_predictions, tree_class_ids).sum()
+    grass_pixels = np.isin(valid_predictions, grass_class_ids).sum()
+    total_pixels = valid_predictions.size
+
+    tree_percent = tree_pixels / total_pixels * 100
+    grass_percent = grass_pixels / total_pixels * 100
+
+    return {
+        "cobertura_arborea_percent": round(float(tree_percent), 1),
+        "cobertura_gramada_percent": round(float(grass_percent), 1),
+        "superficies_vegetadas_percent": round(
+            float(tree_percent + grass_percent),
+            1,
+        ),
+        "pixels_validos": int(total_pixels),
+    }
 
 def calculate_area_metrics(geometry):
     area_gdf = gpd.GeoDataFrame(
@@ -797,6 +824,7 @@ async def simular_urbana(request: Request):
             except Exception as e: logger.error(f"Erro no DEM: {e}")
 
         rf_model = None; tree_classes = []
+        land_cover_percentages = None
 
         # 3. NGRDI E IA (COM RECONHECIMENTO DA CLASSE 4)
         if os.path.exists(simulation_dir / "veg.tif"):
@@ -899,6 +927,46 @@ async def simular_urbana(request: Request):
 
                                         ia_colors = [get_color_for_class(c) for c in unique_classes]
                                         cmap_custom = ListedColormap(ia_colors)
+
+                                        tree_class_ids = [
+                                            class_to_id[class_name]
+                                            for class_name in unique_classes
+                                            if str(class_name).strip() in {"4", "4.0", "Árvore", "Arvore", "árvore", "arvore"}
+                                        ]
+
+                                        grass_class_ids = [
+                                            class_to_id[class_name]
+                                            for class_name in unique_classes
+                                            if str(class_name).strip() in {"5", "5.0", "Grama", "grama", "Grama / Rasteira"}
+                                        ]
+
+                                        if tree_class_ids:
+                                            study_geometry = transform_geom(
+                                                "EPSG:4326",
+                                                veg_src.crs,
+                                                poly.__geo_interface__,
+                                            )
+
+                                            study_mask = rasterize(
+                                                [(study_geometry, 1)],
+                                                out_shape=(out_h, out_w),
+                                                transform=out_transform,
+                                                fill=0,
+                                                dtype="uint8",
+                                            ).astype(bool)
+
+                                            valid_classification_mask = study_mask & ~bg_mask
+
+                                            land_cover_percentages = calculate_land_cover_percentages(
+                                                predictions=preds_ids,
+                                                valid_mask=valid_classification_mask.ravel(),
+                                                tree_class_ids=tree_class_ids,
+                                                grass_class_ids=grass_class_ids,
+                                            )
+                                        else:
+                                            logger.warning(
+                                                "Cobertura arbórea não calculada: as amostras não incluem a classe Árvore (4)."
+                                            )
 
                                         cl_vis = matrix_to_png(
                                             num_preds,
@@ -1466,11 +1534,6 @@ async def simular_urbana(request: Request):
                     ),
                 )
 
-        logger.info(
-            "Simulação [%s] concluída com sucesso.",
-            simulation_id,
-        )
-
         report_stats["rasters"]["temperatura"] = (
             get_raster_visual_stats(
                 rasters_vis,
@@ -1492,16 +1555,19 @@ async def simular_urbana(request: Request):
             )
         )
 
-        report_stats["rasters"]["vegetacao"] = (
-            get_raster_visual_stats(
-                rasters_vis,
-                "Índice NGRDI",
-            )
-        )
+        report_stats["rasters"]["vegetacao"] = {
+            **(get_raster_visual_stats(rasters_vis, "Índice NGRDI") or {}),
+            **(land_cover_percentages or {}),
+        }
 
         logger.warning(
             "ANTES DO RETURN: report_stats.perfis=%s",
             report_stats.get("perfis"),
+        )
+
+        logger.info(
+            "Simulação [%s] concluída com sucesso.",
+            simulation_id,
         )
 
         return {

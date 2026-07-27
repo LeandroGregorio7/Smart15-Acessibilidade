@@ -734,6 +734,80 @@ let ultimaConfiguracaoSimulacao: any = null;
 let ultimaCapturaMapa: string | null = null;
 let cleanupIdentifyHandlers: (() => void) | null = null;
 
+const POI_LEGEND: Record<
+  string,
+  { label: string; color: string }
+> = {
+  escolas: { label: "Escolas e creches", color: "#e53e3e" },
+  hospitais: { label: "Hospitais e clínicas", color: "#3182ce" },
+  parques: { label: "Parques e áreas verdes", color: "#38a169" },
+  mercados: { label: "Mercados e padarias", color: "#d69e2e" },
+  cultura: { label: "Equipamentos culturais", color: "#805ad5" },
+  comercio: { label: "Comércio e serviços", color: "#00b5d8" },
+  academias: { label: "Academias e esportes", color: "#dd6b20" },
+};
+
+function getPoiCategoriesFromSimulation(simulation: any): string[] {
+  try {
+    const osmTargets =
+      typeof simulation?.osm_targets === "string"
+        ? JSON.parse(simulation.osm_targets)
+        : simulation?.osm_targets;
+
+    const features = osmTargets?.features;
+
+    if (!Array.isArray(features)) {
+      return [];
+    }
+
+    return [
+      ...new Set(
+        features
+          .map((feature: any) => feature?.properties?.categoria)
+          .filter((category: unknown): category is string =>
+            typeof category === "string" && category.length > 0,
+          ),
+      ),
+    ];
+  } catch {
+    return [];
+  }
+}
+
+function buildReportMapLegend(
+  selectedTargets: string[] = [],
+  studyAreaColor = "#3182ce",
+) {
+  const timeBands = [
+    { label: "Até 2 min", color: "#4ade80" },
+    { label: "Até 5 min", color: "#a3e635" },
+    { label: "Até 10 min", color: "#facc15" },
+    { label: "Até 15 min", color: "#fb923c" },
+    { label: "Mais de 15 min", color: "#ef4444" },
+  ];
+
+  const selectedPois = selectedTargets
+    .map((target) => POI_LEGEND[target])
+    .filter(Boolean)
+    .map((poi) => ({
+      ...poi,
+      kind: "point" as const,
+    }));
+
+  return [
+    {
+      label: "Área de estudo",
+      color: studyAreaColor,
+      kind: "line" as const,
+    },
+    ...timeBands.map((band) => ({
+      ...band,
+      kind: "fill" as const,
+    })),
+    ...selectedPois,
+  ];
+}
+
 
 const SVG_ICONS = {
     SUCCESS: '<svg viewBox="0 0 24 24" class="s15-icon" style="stroke:#38a169"><use href="#icon-check"/></svg>',
@@ -2057,11 +2131,13 @@ export const plugin = {
                           btnGenerateReport.innerText =
                             "GERANDO RELATÓRIO...";
 
-                          const captureResult =
-                            captureMapAsDataUrl(
-                              getMapInstance(app),
+                            const poiCategories = getPoiCategoriesFromSimulation(
+                              ultimoResultadoSimulacao,
                             );
 
+                            const captureResult = captureMapAsDataUrl(
+                              getMapInstance(app),
+                            );
                             ultimaCapturaMapa =
                             captureResult.dataUrl;
 
@@ -2271,7 +2347,7 @@ export const plugin = {
                                 const mapObj = getMapInstance(app); painelPosProcessamento.style.display = "block"; listaCamadas.innerHTML = ""; listaCamadasRasters.innerHTML = "";
                                 const rasterLegends = wrap.querySelector("#rasterLegendsContainer") as HTMLDivElement;
                                 rasterLegends.innerHTML = `<b style="display: block; margin-bottom: 6px;">Valores Exatos dos Rasters (Mín / Máx):</b>`;
-
+                                let osmPoiLayerId: string | null = null;
                                 if(res.data.rasters_vis) {
                                     Object.keys(res.data.rasters_vis).forEach(rName => {
                                         const rData = res.data.rasters_vis[rName]; const rId = 'smart15-raster-' + rName.replace(/\\s/g,'') + '-' + Date.now();
@@ -2301,10 +2377,46 @@ export const plugin = {
                                 }
 
                                 if (res.data.osm_targets && mapObj) {
-                                    const osmId = 'smart15-osm-' + Date.now(); mapObj.addSource(osmId, { type: 'geojson', data: JSON.parse(res.data.osm_targets) });
-                                    const colorExpr = ['match', ['get', 'categoria'], 'escolas', '#e53e3e', 'hospitais', '#3182ce', 'parques', '#38a169', 'mercados', '#d69e2e', 'cultura', '#805ad5', 'comercio', '#00b5d8', 'academias', '#dd6b20', '#718096'];
-                                    mapObj.addLayer({ 'id': osmId+'-circle', 'type': 'circle', 'source': osmId, 'paint': { 'circle-radius': 6, 'circle-color': colorExpr, 'circle-stroke-width': 1, 'circle-stroke-color': '#fff' } });
-                                    layersAtivos.push(osmId+'-circle'); appendLayerToggle(osmId+'-circle', "POIs Equipamentos Urbanos", listaCamadas);
+                                  const osmId = "smart15-osm-" + Date.now();
+
+                                  mapObj.addSource(osmId, {
+                                    type: "geojson",
+                                    data: JSON.parse(res.data.osm_targets),
+                                  });
+
+                                  const colorExpr = [
+                                    "match",
+                                    ["get", "categoria"],
+                                    "escolas", "#e53e3e",
+                                    "hospitais", "#3182ce",
+                                    "parques", "#38a169",
+                                    "mercados", "#d69e2e",
+                                    "cultura", "#805ad5",
+                                    "comercio", "#00b5d8",
+                                    "academias", "#dd6b20",
+                                    "#718096",
+                                  ];
+
+                                  osmPoiLayerId = osmId + "-circle";
+
+                                  mapObj.addLayer({
+                                    id: osmPoiLayerId,
+                                    type: "circle",
+                                    source: osmId,
+                                    paint: {
+                                      "circle-radius": 6,
+                                      "circle-color": colorExpr,
+                                      "circle-stroke-width": 1,
+                                      "circle-stroke-color": "#fff",
+                                    },
+                                  });
+
+                                  layersAtivos.push(osmPoiLayerId);
+                                  appendLayerToggle(
+                                    osmPoiLayerId,
+                                    "POIs Equipamentos Urbanos",
+                                    listaCamadas,
+                                  );
                                 }
 
                                 if (res.data.simulacoes && mapObj) {
@@ -2329,6 +2441,10 @@ export const plugin = {
                                         appendLayerToggle(idOk+'-layer', tipo + ' - ' + perfil, listaCamadas);
                                     });
                                 }
+                                if (osmPoiLayerId && mapObj.getLayer(osmPoiLayerId)) {
+                                  mapObj.moveLayer(osmPoiLayerId);
+                                }
+
                                 setTimeout(() => { updateLayerStyle(); progressBar.style.width="100%"; progressText.innerText="100%"; progressLabel.innerHTML=SVG_ICONS.SUCCESS+" Concluído!"; setTimeout(()=>progressContainer.style.display="none", 2000); }, 300);
                             }
                         } catch (erro) { clearInterval((window as any).simProgressInterval); progressLabel.innerHTML=SVG_ICONS.WARN+" Falha no Servidor."; } 

@@ -414,12 +414,20 @@ export async function adaptSimulationToReport(
         },
 
         treeCoverage: {
-            averagePercent: numberOrNull(
-            vegetation.percentual_cobertura
-            ?? vegetation.percentual_indice_positivo
-            ?? vegetation.averagePercent,
-            ),
+          averagePercent: numberOrNull(
+            vegetation.cobertura_arborea_percent
+              ?? vegetation.percentual_cobertura_arborea
+              ?? vegetation.percentual_cobertura_arborea
+              ?? vegetation.averagePercent,
+          ),
         },
+
+        grassCoveragePercent: numberOrNull(
+          vegetation.cobertura_gramada_percent,
+        ),
+        totalVegetatedSurfacePercent: numberOrNull(
+          vegetation.superficies_vegetadas_percent,
+        ),
 
         pavement: null,
         accessibility: null,

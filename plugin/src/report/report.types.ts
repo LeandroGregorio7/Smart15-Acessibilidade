@@ -94,6 +94,8 @@ export interface RouteIndicators {
 
   treeCoverage: {
     averagePercent: number | null;
+    grassCoveragePercent?: number | null;
+    totalVegetatedSurfacePercent?: number | null;
   };
 
   pavement?: {
