@@ -2131,13 +2131,22 @@ export const plugin = {
                           btnGenerateReport.innerText =
                             "GERANDO RELATÓRIO...";
 
-                            const poiCategories = getPoiCategoriesFromSimulation(
-                              ultimoResultadoSimulacao,
-                            );
+                          const poiCategories = getPoiCategoriesFromSimulation(
+                            ultimoResultadoSimulacao,
+                          );
 
-                            const captureResult = captureMapAsDataUrl(
-                              getMapInstance(app),
-                            );
+                          const captureResult = await captureMapAsDataUrl(
+                            getMapInstance(app),
+                            {
+                              legend: {
+                                title: "Legenda",
+                                items: buildReportMapLegend(
+                                  poiCategories,
+                                  corArea.value,
+                                ),
+                              },
+                            },
+                          );
                             ultimaCapturaMapa =
                             captureResult.dataUrl;
 
