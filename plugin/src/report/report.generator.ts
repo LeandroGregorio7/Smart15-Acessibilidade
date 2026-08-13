@@ -1,6 +1,15 @@
-import { analyzeFactors, buildExecutiveSummary} from "./report.rules";
+import {
+  analyzeFactors,
+  buildExecutiveSummary,
+} from "./report.rules";
+
 import { REPORT_CSS } from "./report.css";
-import { FactorImpact, ReportData } from "./report.types";
+
+import type {
+  FactorImpact,
+  ReportData,
+} from "./report.types";
+
 import {
   escapeHtml,
   formatArea,
@@ -10,21 +19,45 @@ import {
   uniqueStrings,
 } from "./report.utils";
 
+import {
+  DEFAULT_LOCALE,
+  t,
+} from "../i18n/i18n";
 
-const LEVEL_LABELS: Record<FactorImpact["level"], string> = {
-  positive: "Favorável",
-  neutral: "Neutra",
-  low: "Baixa influência",
-  moderate: "Influência moderada",
-  high: "Influência elevada",
-  critical: "Influência crítica",
-};
+import type {
+  SupportedLocale,
+} from "../i18n/i18n.types";
 
-function renderMetric(label: string, value: string): string {
+function getLocale(
+  report: ReportData,
+): SupportedLocale {
+  return report.locale ?? DEFAULT_LOCALE;
+}
+
+function levelLabel(
+  factor: FactorImpact,
+  locale: SupportedLocale,
+): string {
+  return t(
+    `level.${factor.level}`,
+    {},
+    locale,
+  );
+}
+
+function renderMetric(
+  label: string,
+  value: string,
+): string {
   return `
     <div class="metric">
-      <span class="metric-label">${escapeHtml(label)}</span>
-      <span class="metric-value">${escapeHtml(value)}</span>
+      <span class="metric-label">
+        ${escapeHtml(label)}
+      </span>
+
+      <span class="metric-value">
+        ${escapeHtml(value)}
+      </span>
     </div>
   `;
 }
@@ -40,78 +73,175 @@ function isFiniteNumber(
 
 function formatOptionalDistance(
   value: number | null | undefined,
+  locale: SupportedLocale,
 ): string {
   return isFiniteNumber(value)
-    ? formatDistance(value)
-    : "Não disponível";
+    ? formatDistance(
+        value,
+        locale,
+      )
+    : t(
+        "common.notAvailable",
+        {},
+        locale,
+      );
 }
 
 function formatOptionalMinutes(
   value: number | null | undefined,
+  locale: SupportedLocale,
 ): string {
   return isFiniteNumber(value)
-    ? `${formatNumber(value, 2)} min`
-    : "Não disponível";
+    ? `${formatNumber(
+        value,
+        2,
+        locale,
+      )} min`
+    : t(
+        "common.notAvailable",
+        {},
+        locale,
+      );
 }
 
 function formatOptionalSpeed(
   value: number | null | undefined,
+  locale: SupportedLocale,
 ): string {
   return isFiniteNumber(value)
-    ? `${formatNumber(value, 2)} km/h`
-    : "Não disponível";
+    ? `${formatNumber(
+        value,
+        2,
+        locale,
+      )} km/h`
+    : t(
+        "common.notAvailable",
+        {},
+        locale,
+      );
 }
 
 function formatOptionalArea(
   value: number | null | undefined,
+  locale: SupportedLocale,
 ): string {
   return isFiniteNumber(value)
-    ? formatArea(value)
-    : "Não disponível";
+    ? formatArea(
+        value,
+        locale,
+      )
+    : t(
+        "common.notAvailable",
+        {},
+        locale,
+      );
 }
 
-function renderFactor(factor: FactorImpact): string {
+function renderFactor(
+  factor: FactorImpact,
+  locale: SupportedLocale,
+): string {
   const impact =
     factor.impactMinutes === undefined
       ? ""
       : `
         <p>
-          <strong>Impacto estimado no tempo:</strong>
+          <strong>
+            ${escapeHtml(
+              t(
+                "report.factor.timeImpact",
+                {},
+                locale,
+              ),
+            )}
+          </strong>
+
           ${factor.impactMinutes >= 0 ? "+" : ""}
-          ${formatNumber(factor.impactMinutes, 2)} min
+
+          ${formatNumber(
+            factor.impactMinutes,
+            2,
+            locale,
+          )} min
         </p>
       `;
 
   const recommendations =
     factor.recommendations.length === 0
-      ? "<p>Não foram identificadas recomendações prioritárias para este fator.</p>"
+      ? `
+        <p>
+          ${escapeHtml(
+            t(
+              "report.factor.noRecommendations",
+              {},
+              locale,
+            ),
+          )}
+        </p>
+      `
       : `
         <ul>
           ${factor.recommendations
-            .map((item) => `<li>${escapeHtml(item)}</li>`)
+            .map(
+              (item) =>
+                `<li>${escapeHtml(item)}</li>`,
+            )
             .join("")}
         </ul>
       `;
 
   return `
-    <article class="factor factor-${factor.level}">
+    <article
+      class="factor factor-${factor.level}"
+    >
       <h3>
         ${escapeHtml(factor.label)}
+
         <span class="classification">
-          ${escapeHtml(LEVEL_LABELS[factor.level])}
+          ${escapeHtml(
+            levelLabel(
+              factor,
+              locale,
+            ),
+          )}
         </span>
       </h3>
 
       <p>
-        <strong>Valor observado:</strong>
-        ${formatNumber(factor.rawValue, 1)} ${escapeHtml(factor.unit)}
+        <strong>
+          ${escapeHtml(
+            t(
+              "report.factor.observedValue",
+              {},
+              locale,
+            ),
+          )}
+        </strong>
+
+        ${formatNumber(
+          factor.rawValue,
+          1,
+          locale,
+        )}
+        ${escapeHtml(factor.unit)}
       </p>
 
-      <p>${escapeHtml(factor.description)}</p>
+      <p>
+        ${escapeHtml(factor.description)}
+      </p>
 
       ${impact}
 
-      <h4>Recomendações relacionadas</h4>
+      <h4>
+        ${escapeHtml(
+          t(
+            "report.factor.relatedRecommendations",
+            {},
+            locale,
+          ),
+        )}
+      </h4>
+
       ${recommendations}
     </article>
   `;
@@ -136,9 +266,15 @@ function renderMap(
         src="${escapeHtml(map.dataUrl)}"
         alt="${escapeHtml(map.title)}"
       >
+
       <figcaption>
-        <strong>${escapeHtml(map.title)}.</strong>
-        ${escapeHtml(map.description ?? "")}
+        <strong>
+          ${escapeHtml(map.title)}.
+        </strong>
+
+        ${escapeHtml(
+          map.description ?? "",
+        )}
       </figcaption>
     </figure>
   `;
@@ -148,8 +284,13 @@ function buildSummary(
   report: ReportData,
   factors: FactorImpact[],
 ): string {
-  const { indicators, configuration } =
-    report;
+  const {
+    indicators,
+    configuration,
+  } = report;
+
+  const locale =
+    getLocale(report);
 
   const adjustedTime =
     indicators.adjustedTimeMinutes;
@@ -162,7 +303,8 @@ function buildSummary(
           || factor.level === "critical",
       )
       .map(
-        (factor) => factor.label,
+        (factor) =>
+          factor.label,
       );
 
   let summary: string;
@@ -173,28 +315,55 @@ function buildSummary(
       <= configuration.targetTimeMinutes;
 
     summary = withinTarget
-      ? `O resultado encontra-se dentro do limite de `
-        + `${formatNumber(
-          configuration.targetTimeMinutes,
-        )} minutos definido para a análise.`
-      : `O tempo ajustado ultrapassa o limite de `
-        + `${formatNumber(
-          configuration.targetTimeMinutes,
-        )} minutos definido para a análise.`;
+      ? t(
+          "report.summary.withinTarget",
+          {
+            target: formatNumber(
+              configuration.targetTimeMinutes,
+              1,
+              locale,
+            ),
+          },
+          locale,
+        )
+      : t(
+          "report.summary.aboveTarget",
+          {
+            target: formatNumber(
+              configuration.targetTimeMinutes,
+              1,
+              locale,
+            ),
+          },
+          locale,
+        );
   } else {
-    summary =
-      "Não foi possível determinar o tempo ajustado "
-      + "com os dados atualmente disponibilizados.";
+    summary = t(
+      "report.summary.noAdjustedTime",
+      {},
+      locale,
+    );
   }
 
-  if (restrictiveFactors.length > 0) {
-    summary +=
-      " Os fatores com maior nível de restrição foram: "
-      + `${restrictiveFactors.join(", ")}.`;
+  if (
+    restrictiveFactors.length > 0
+  ) {
+    summary += " "
+      + t(
+        "report.summary.restrictiveFactors",
+        {
+          factors:
+            restrictiveFactors.join(", "),
+        },
+        locale,
+      );
   } else {
-    summary +=
-      " Não foram identificados fatores classificados "
-      + "com influência elevada ou crítica.";
+    summary += " "
+      + t(
+        "report.summary.noRestrictiveFactors",
+        {},
+        locale,
+      );
   }
 
   return summary;
@@ -249,108 +418,187 @@ function getMobilityContext(
   speedLabel: string;
   footerLabel: string;
 } {
+  const locale =
+    getLocale(report);
+
   const profiles =
     getProfileCodes(report)
-      .map((profile) =>
-        profile.toLowerCase(),
+      .map(
+        (profile) =>
+          profile.toLowerCase(),
       );
 
   const hasBike =
     profiles.some(
       (profile) =>
         profile.includes("bike")
-        || profile.includes("bicicleta"),
+        || profile.includes("bicicleta")
+        || profile.includes("ciclista"),
     );
 
   const hasPedestrian =
     profiles.some(
       (profile) =>
         profile.includes("pedestre")
+        || profile.includes("walking")
         || profile.includes("pe"),
     );
 
-  if (hasBike && hasPedestrian) {
+  if (
+    hasBike
+    && hasPedestrian
+  ) {
     return {
-      title:
-        "Relatório de Análise de Acessibilidade Urbana",
-      shortLabel:
-        "Acessibilidade Urbana",
-      movementDescription:
-        "deslocamentos a pé e por bicicleta",
-      speedLabel:
-        "Velocidade-base de referência",
-      footerLabel:
-        "acessibilidade urbana",
+      title: t(
+        "report.mobility.mixed.title",
+        {},
+        locale,
+      ),
+      shortLabel: t(
+        "report.mobility.mixed.short",
+        {},
+        locale,
+      ),
+      movementDescription: t(
+        "report.mobility.mixed.movement",
+        {},
+        locale,
+      ),
+      speedLabel: t(
+        "report.mobility.mixed.speed",
+        {},
+        locale,
+      ),
+      footerLabel: t(
+        "report.mobility.mixed.footer",
+        {},
+        locale,
+      ),
     };
   }
 
   if (hasBike) {
     return {
-      title:
-        "Relatório de Análise de Acessibilidade Cicloviária",
-      shortLabel:
-        "Acessibilidade Cicloviária",
-      movementDescription:
-        "deslocamentos por bicicleta",
-      speedLabel:
-        "Velocidade-base de ciclismo",
-      footerLabel:
-        "acessibilidade cicloviária",
+      title: t(
+        "report.mobility.bike.title",
+        {},
+        locale,
+      ),
+      shortLabel: t(
+        "report.mobility.bike.short",
+        {},
+        locale,
+      ),
+      movementDescription: t(
+        "report.mobility.bike.movement",
+        {},
+        locale,
+      ),
+      speedLabel: t(
+        "report.mobility.bike.speed",
+        {},
+        locale,
+      ),
+      footerLabel: t(
+        "report.mobility.bike.footer",
+        {},
+        locale,
+      ),
     };
   }
 
   return {
-    title:
-      "Relatório de Análise de Caminhabilidade",
-    shortLabel:
-      "Caminhabilidade",
-    movementDescription:
-      "deslocamentos a pé",
-    speedLabel:
-      "Velocidade-base de caminhada",
-    footerLabel:
-      "caminhabilidade",
+    title: t(
+      "report.mobility.walk.title",
+      {},
+      locale,
+    ),
+    shortLabel: t(
+      "report.mobility.walk.short",
+      {},
+      locale,
+    ),
+    movementDescription: t(
+      "report.mobility.walk.movement",
+      {},
+      locale,
+    ),
+    speedLabel: t(
+      "report.mobility.walk.speed",
+      {},
+      locale,
+    ),
+    footerLabel: t(
+      "report.mobility.walk.footer",
+      {},
+      locale,
+    ),
   };
 }
 
-export function generateReportHtml(report: ReportData): string {
+export function generateReportHtml(
+  report: ReportData,
+): string {
   if (!report) {
-    throw new Error("Os dados do relatório não foram informados.");
-  }
-
-  const identification = report.identification ?? ({} as ReportData["identification"]);
-  const configuration = report.configuration ?? ({} as ReportData["configuration"]);
-  const indicators = report.indicators ?? ({} as ReportData["indicators"]);
-
-  if (!report.identification) {
     throw new Error(
-      "Relatório incompatível: o adapter não forneceu o objeto identification.",
+      "Report data was not provided.",
     );
   }
 
-  if (!report.configuration) {
+  const locale =
+    getLocale(report);
+
+  const identification =
+    report.identification;
+
+  const configuration =
+    report.configuration;
+
+  const indicators =
+    report.indicators;
+
+  if (!identification) {
     throw new Error(
-      "Relatório incompatível: o adapter não forneceu o objeto configuration.",
+      "Incompatible report: the adapter did not provide identification.",
     );
   }
 
-  if (!report.indicators) {
+  if (!configuration) {
     throw new Error(
-      "Relatório incompatível: o adapter não forneceu o objeto indicators.",
+      "Incompatible report: the adapter did not provide configuration.",
     );
   }
 
-  const factors = analyzeFactors(report);
+  if (!indicators) {
+    throw new Error(
+      "Incompatible report: the adapter did not provide indicators.",
+    );
+  }
 
-  const executiveSummary =  buildExecutiveSummary(report, factors);
+  const factors =
+    analyzeFactors(report);
+
+  const executiveSummary =
+    buildExecutiveSummary(
+      report,
+      factors,
+    );
 
   const restrictiveFactorsText =
-  executiveSummary.restrictiveFactors.length > 0
-    ? executiveSummary.restrictiveFactors.join(", ")
-    : "Não foram identificados fatores prioritários.";
+    executiveSummary
+      .restrictiveFactors
+      .length > 0
+      ? executiveSummary
+          .restrictiveFactors
+          .join(", ")
+      : t(
+          "report.executive.noPriorityFactors",
+          {},
+          locale,
+        );
 
   const mobility =
-  getMobilityContext(report);
+    getMobilityContext(report);
 
   const selectedProfiles =
     getSelectedProfiles(report);
@@ -358,11 +606,19 @@ export function generateReportHtml(report: ReportData): string {
   const profilesText =
     selectedProfiles.length > 0
       ? selectedProfiles.join(", ")
-      : "Não informado";
+      : t(
+          "common.notProvided",
+          {},
+          locale,
+        );
 
-  const recommendations = uniqueStrings(
-    factors.flatMap((factor) => factor.recommendations),
-  );
+  const recommendations =
+    uniqueStrings(
+      factors.flatMap(
+        (factor) =>
+          factor.recommendations,
+      ),
+    );
 
   const adjustedDifference =
     isFiniteNumber(
@@ -375,134 +631,412 @@ export function generateReportHtml(report: ReportData): string {
         - indicators.baseTimeMinutes
       : null;
 
-  const summary = buildSummary(report, factors);
+  const summary =
+    buildSummary(
+      report,
+      factors,
+    );
 
   const maps = [
-    renderMap(report.maps?.overview),
-    renderMap(report.maps?.route),
-    renderMap(report.maps?.isochrone),
+    renderMap(
+      report.maps?.overview,
+    ),
+    renderMap(
+      report.maps?.route,
+    ),
+    renderMap(
+      report.maps?.isochrone,
+    ),
   ].join("");
 
   return `
     <!DOCTYPE html>
-    <html lang="pt-BR">
+
+    <html lang="${escapeHtml(locale)}">
       <head>
         <meta charset="UTF-8">
+
         <meta
           name="viewport"
           content="width=device-width, initial-scale=1"
         >
+
         <title>
-          ${escapeHtml(mobility.shortLabel)} -
+          ${escapeHtml(
+            mobility.shortLabel,
+          )}
+          -
           ${escapeHtml(
             identification.destinationName
-            ?? "Destino não informado",
+            ?? t(
+              "report.destination.notProvided",
+              {},
+              locale,
+            ),
           )}
         </title>
 
-        <style>${REPORT_CSS}</style>
+        <style>
+          ${REPORT_CSS}
+        </style>
       </head>
 
       <body>
         <div class="report-actions">
-            <button
-                type="button"
-                class="report-action-button"
-                id="download-pdf-button"
-                title="Salvar relatório em formato PDF"
-            >
-                Imprimir / Salvar PDF
-            </button>
+          <button
+            type="button"
+            class="report-action-button"
+            id="download-pdf-button"
+            title="${escapeHtml(
+              t(
+                "report.print.title",
+                {},
+                locale,
+              ),
+            )}"
+          >
+            ${escapeHtml(
+              t(
+                "report.print.button",
+                {},
+                locale,
+              ),
+            )}
+          </button>
         </div>
+
         <main class="report">
           <header class="report-header">
-           <h1>${escapeHtml(mobility.title)}</h1>
+            <h1>
+              ${escapeHtml(
+                mobility.title,
+              )}
+            </h1>
 
             <p>
-              <strong>Área:</strong>
-              ${escapeHtml(identification.areaName ?? "Não informada")}
+              <strong>
+                ${escapeHtml(
+                  t(
+                    "report.header.area",
+                    {},
+                    locale,
+                  ),
+                )}
+              </strong>
+
+              ${escapeHtml(
+                identification.areaName
+                ?? t(
+                  "common.notProvided",
+                  {},
+                  locale,
+                ),
+              )}
             </p>
 
             <p>
-              <strong>Destino:</strong>
-              ${escapeHtml(identification.destinationName ?? "Destino não informado")}
-              — ${escapeHtml(identification.destinationType ?? "Não informado")}
+              <strong>
+                ${escapeHtml(
+                  t(
+                    "report.header.destination",
+                    {},
+                    locale,
+                  ),
+                )}
+              </strong>
+
+              ${escapeHtml(
+                identification.destinationName
+                ?? t(
+                  "report.destination.notProvided",
+                  {},
+                  locale,
+                ),
+              )}
+
+              —
+              ${escapeHtml(
+                identification.destinationType
+                ?? t(
+                  "common.notProvided",
+                  {},
+                  locale,
+                ),
+              )}
             </p>
 
             <p>
-              <strong>Gerado em:</strong>
-              ${escapeHtml(formatDateTime(identification.generatedAt ?? new Date().toISOString()))}
+              <strong>
+                ${escapeHtml(
+                  t(
+                    "report.header.generatedAt",
+                    {},
+                    locale,
+                  ),
+                )}
+              </strong>
+
+              ${escapeHtml(
+                formatDateTime(
+                  identification.generatedAt
+                    ?? new Date().toISOString(),
+                  locale,
+                ),
+              )}
             </p>
           </header>
 
-          <section class="executive-summary">
-            <h2>1. Sumário executivo</h2>
+          <section
+            class="executive-summary"
+          >
+            <h2>
+              ${escapeHtml(
+                t(
+                  "report.section.executive",
+                  {},
+                  locale,
+                ),
+              )}
+            </h2>
 
             <p>
-              <strong>Situação:</strong>
-              ${escapeHtml(executiveSummary.status)}
+              <strong>
+                ${escapeHtml(
+                  t(
+                    "report.executive.status",
+                    {},
+                    locale,
+                  ),
+                )}
+              </strong>
+
+              ${escapeHtml(
+                executiveSummary.status,
+              )}
             </p>
 
             <p>
-              <strong>Prioridade:</strong>
-              ${escapeHtml(executiveSummary.priority)}
+              <strong>
+                ${escapeHtml(
+                  t(
+                    "report.executive.priority",
+                    {},
+                    locale,
+                  ),
+                )}
+              </strong>
+
+              ${escapeHtml(
+                executiveSummary.priority,
+              )}
             </p>
 
             <p>
-              <strong>Conclusão:</strong>
-              ${escapeHtml(executiveSummary.headline)}
+              <strong>
+                ${escapeHtml(
+                  t(
+                    "report.executive.conclusion",
+                    {},
+                    locale,
+                  ),
+                )}
+              </strong>
+
+              ${escapeHtml(
+                executiveSummary.headline,
+              )}
             </p>
 
             <p>
-              <strong>Análise:</strong>
-              ${escapeHtml(executiveSummary.detail)}
+              <strong>
+                ${escapeHtml(
+                  t(
+                    "report.executive.analysis",
+                    {},
+                    locale,
+                  ),
+                )}
+              </strong>
+
+              ${escapeHtml(
+                executiveSummary.detail,
+              )}
             </p>
 
             <p>
-              <strong>Fatores prioritários:</strong>
-              ${escapeHtml(restrictiveFactorsText)}
+              <strong>
+                ${escapeHtml(
+                  t(
+                    "report.executive.priorityFactors",
+                    {},
+                    locale,
+                  ),
+                )}
+              </strong>
+
+              ${escapeHtml(
+                restrictiveFactorsText,
+              )}
             </p>
 
             <p>
-              <strong>Diretriz de ação:</strong>
-              ${escapeHtml(executiveSummary.recommendedAction)}
+              <strong>
+                ${escapeHtml(
+                  t(
+                    "report.executive.action",
+                    {},
+                    locale,
+                  ),
+                )}
+              </strong>
+
+              ${escapeHtml(
+                executiveSummary
+                  .recommendedAction,
+              )}
             </p>
           </section>
 
           <section>
-            <h2>2. Identificação e caracterização da área</h2>
+            <h2>
+              ${escapeHtml(
+                t(
+                  "report.section.identification",
+                  {},
+                  locale,
+                ),
+              )}
+            </h2>
+
             <table>
               <tbody>
                 <tr>
-                  <th>Identificador da análise</th>
-                  <td>${escapeHtml(identification.analysisId ?? "Não informado")}</td>
-                </tr>
-                <tr>
-                  <th>Município/Estado</th>
-                  <td>
-                    ${escapeHtml(identification.municipality ?? "Não informado")}
-                    ${identification.state
-                      ? ` / ${escapeHtml(identification.state)}`
-                      : ""}
-                  </td>
-                </tr>
-                <tr>
-                  <th>Área analisada</th>
-                  <td>${escapeHtml(formatArea(indicators.areaSquareMeters))}</td>
-                </tr>
-                <tr>
-                  <th>Destino analisado</th>
-                  <td>
-                    ${escapeHtml(identification.destinationName ?? "Destino não informado")}
-                    (${escapeHtml(identification.destinationType ?? "Não informado")})
-                  </td>
-                </tr>
-                <tr>
-                  <th>Sistema de coordenadas</th>
+                  <th>
+                    ${escapeHtml(
+                      t(
+                        "report.identification.analysisId",
+                        {},
+                        locale,
+                      ),
+                    )}
+                  </th>
+
                   <td>
                     ${escapeHtml(
-                      identification.coordinateReferenceSystem ??
-                        "Não informado",
+                      identification.analysisId
+                      ?? t(
+                        "common.notProvided",
+                        {},
+                        locale,
+                      ),
+                    )}
+                  </td>
+                </tr>
+
+                <tr>
+                  <th>
+                    ${escapeHtml(
+                      t(
+                        "report.identification.location",
+                        {},
+                        locale,
+                      ),
+                    )}
+                  </th>
+
+                  <td>
+                    ${escapeHtml(
+                      identification.municipality
+                      ?? t(
+                        "common.notProvided",
+                        {},
+                        locale,
+                      ),
+                    )}
+
+                    ${
+                      identification.state
+                        ? ` / ${escapeHtml(
+                            identification.state,
+                          )}`
+                        : ""
+                    }
+                  </td>
+                </tr>
+
+                <tr>
+                  <th>
+                    ${escapeHtml(
+                      t(
+                        "report.identification.area",
+                        {},
+                        locale,
+                      ),
+                    )}
+                  </th>
+
+                  <td>
+                    ${escapeHtml(
+                      formatArea(
+                        indicators.areaSquareMeters,
+                        locale,
+                      ),
+                    )}
+                  </td>
+                </tr>
+
+                <tr>
+                  <th>
+                    ${escapeHtml(
+                      t(
+                        "report.identification.destination",
+                        {},
+                        locale,
+                      ),
+                    )}
+                  </th>
+
+                  <td>
+                    ${escapeHtml(
+                      identification.destinationName
+                      ?? t(
+                        "report.destination.notProvided",
+                        {},
+                        locale,
+                      ),
+                    )}
+
+                    (${escapeHtml(
+                      identification.destinationType
+                      ?? t(
+                        "common.notProvided",
+                        {},
+                        locale,
+                      ),
+                    )})
+                  </td>
+                </tr>
+
+                <tr>
+                  <th>
+                    ${escapeHtml(
+                      t(
+                        "report.identification.crs",
+                        {},
+                        locale,
+                      ),
+                    )}
+                  </th>
+
+                  <td>
+                    ${escapeHtml(
+                      identification
+                        .coordinateReferenceSystem
+                      ?? t(
+                        "common.notProvided",
+                        {},
+                        locale,
+                      ),
                     )}
                   </td>
                 </tr>
@@ -510,69 +1044,164 @@ export function generateReportHtml(report: ReportData): string {
             </table>
 
             <p>
-              A análise considera
+              ${escapeHtml(
+                t(
+                  "report.identification.analysisConsiders",
+                  {},
+                  locale,
+                ),
+              )}
+
               <strong>
                 ${escapeHtml(
-                  mobility.movementDescription,
+                  mobility
+                    .movementDescription,
                 )}
               </strong>
-              até
+
+              ${escapeHtml(
+                t(
+                  "report.identification.to",
+                  {},
+                  locale,
+                ),
+              )}
+
               <strong>
                 ${escapeHtml(
                   identification.destinationName
-                  ?? "Destino não informado",
-                )}
-              </strong>,
-              nas categorias
-              <strong>
-                ${escapeHtml(
-                  identification.destinationType
-                  ?? "Não informado",
+                  ?? t(
+                    "report.destination.notProvided",
+                    {},
+                    locale,
+                  ),
                 )}
               </strong>.
+
               ${
                 isFiniteNumber(
                   indicators.distanceMeters,
                 )
                   ? `
-                    A distância calculada pela rede foi de
+                    ${escapeHtml(
+                      t(
+                        "report.identification.networkDistance",
+                        {},
+                        locale,
+                      ),
+                    )}
+
                     <strong>
-                      ${formatDistance(
-                        indicators.distanceMeters,
+                      ${escapeHtml(
+                        formatDistance(
+                          indicators.distanceMeters,
+                          locale,
+                        ),
                       )}
                     </strong>.
                   `
                   : `
-                    A distância de rede não foi disponibilizada
-                    pelo processamento atual.
+                    ${escapeHtml(
+                      t(
+                        "report.identification.noNetworkDistance",
+                        {},
+                        locale,
+                      ),
+                    )}
                   `
               }
             </p>
           </section>
 
           <section>
-            <h2>3. Configuração da simulação</h2>
+            <h2>
+              ${escapeHtml(
+                t(
+                  "report.section.configuration",
+                  {},
+                  locale,
+                ),
+              )}
+            </h2>
 
             <table>
               <thead>
                 <tr>
-                  <th>Parâmetro</th>
-                  <th>Valor</th>
+                  <th>
+                    ${escapeHtml(
+                      t(
+                        "report.configuration.parameter",
+                        {},
+                        locale,
+                      ),
+                    )}
+                  </th>
+
+                  <th>
+                    ${escapeHtml(
+                      t(
+                        "report.configuration.value",
+                        {},
+                        locale,
+                      ),
+                    )}
+                  </th>
                 </tr>
               </thead>
+
               <tbody>
                 <tr>
-                  <td>Tempo-alvo</td>
-                  <td>${formatNumber(configuration.targetTimeMinutes)} min</td>
-                </tr>
-                <tr>
-                  <td>Perfis de mobilidade</td>
-                  <td>${escapeHtml(profilesText)}</td>
-                </tr>
-                <tr>
-                  <td>${escapeHtml(mobility.speedLabel)}</td>
                   <td>
-                    ${formatNumber(configuration.baseWalkingSpeedKmH, 2)} km/h
+                    ${escapeHtml(
+                      t(
+                        "report.configuration.targetTime",
+                        {},
+                        locale,
+                      ),
+                    )}
+                  </td>
+
+                  <td>
+                    ${formatNumber(
+                      configuration.targetTimeMinutes,
+                      1,
+                      locale,
+                    )} min
+                  </td>
+                </tr>
+
+                <tr>
+                  <td>
+                    ${escapeHtml(
+                      t(
+                        "report.configuration.profiles",
+                        {},
+                        locale,
+                      ),
+                    )}
+                  </td>
+
+                  <td>
+                    ${escapeHtml(
+                      profilesText,
+                    )}
+                  </td>
+                </tr>
+
+                <tr>
+                  <td>
+                    ${escapeHtml(
+                      mobility.speedLabel,
+                    )}
+                  </td>
+
+                  <td>
+                    ${formatNumber(
+                      configuration
+                        .baseWalkingSpeedKmH,
+                      2,
+                      locale,
+                    )} km/h
                   </td>
                 </tr>
               </tbody>
@@ -580,83 +1209,165 @@ export function generateReportHtml(report: ReportData): string {
           </section>
 
           <section>
-            <h2>4. Resultados da simulação</h2>
+            <h2>
+              ${escapeHtml(
+                t(
+                  "report.section.results",
+                  {},
+                  locale,
+                ),
+              )}
+            </h2>
 
             <div class="metrics">
               ${renderMetric(
-                "Distância",
+                t(
+                  "report.metric.distance",
+                  {},
+                  locale,
+                ),
                 formatOptionalDistance(
                   indicators.distanceMeters,
+                  locale,
                 ),
               )}
 
               ${renderMetric(
-                "Tempo sem ponderação",
+                t(
+                  "report.metric.baseTime",
+                  {},
+                  locale,
+                ),
                 formatOptionalMinutes(
                   indicators.baseTimeMinutes,
+                  locale,
                 ),
               )}
 
               ${renderMetric(
-                "Tempo ajustado",
+                t(
+                  "report.metric.adjustedTime",
+                  {},
+                  locale,
+                ),
                 formatOptionalMinutes(
                   indicators.adjustedTimeMinutes,
+                  locale,
                 ),
               )}
 
               ${renderMetric(
-                "Diferença produzida pelos fatores",
+                t(
+                  "report.metric.factorDifference",
+                  {},
+                  locale,
+                ),
                 adjustedDifference === null
-                  ? "Não disponível"
-                  : `${adjustedDifference >= 0 ? "+" : ""}`
-                    + `${formatNumber(
+                  ? t(
+                      "common.notAvailable",
+                      {},
+                      locale,
+                    )
+                  : `${
+                      adjustedDifference >= 0
+                        ? "+"
+                        : ""
+                    }${formatNumber(
                       adjustedDifference,
                       2,
+                      locale,
                     )} min`,
               )}
 
               ${renderMetric(
-                "Velocidade média",
+                t(
+                  "report.metric.averageSpeed",
+                  {},
+                  locale,
+                ),
                 formatOptionalSpeed(
                   indicators.averageSpeedKmH,
+                  locale,
                 ),
               )}
 
               ${renderMetric(
-                "Área alcançável",
+                t(
+                  "report.metric.reachableArea",
+                  {},
+                  locale,
+                ),
                 formatOptionalArea(
-                  indicators.reachableAreaSquareMeters,
+                  indicators
+                    .reachableAreaSquareMeters,
+                  locale,
                 ),
               )}
             </div>
+
             ${maps}
           </section>
 
           <section>
-            <h2>5. Interpretação técnica</h2>
+            <h2>
+              ${escapeHtml(
+                t(
+                  "report.section.interpretation",
+                  {},
+                  locale,
+                ),
+              )}
+            </h2>
 
-            <p>${escapeHtml(summary)}</p>
+            <p>
+              ${escapeHtml(summary)}
+            </p>
 
-            ${factors.map(renderFactor).join("")}
+            ${factors
+              .map(
+                (factor) =>
+                  renderFactor(
+                    factor,
+                    locale,
+                  ),
+              )
+              .join("")}
           </section>
 
           <section>
-            <h2>6. Recomendações para o planejamento urbano</h2>
+            <h2>
+              ${escapeHtml(
+                t(
+                  "report.section.recommendations",
+                  {},
+                  locale,
+                ),
+              )}
+            </h2>
 
             ${
               recommendations.length === 0
                 ? `
                   <p>
-                    Não foram geradas recomendações prioritárias com base
-                    nos critérios atualmente avaliados.
+                    ${escapeHtml(
+                      t(
+                        "report.recommendations.none",
+                        {},
+                        locale,
+                      ),
+                    )}
                   </p>
                 `
                 : `
                   <ol>
                     ${recommendations
                       .map(
-                        (recommendation) =>
-                          `<li>${escapeHtml(recommendation)}</li>`,
+                        (
+                          recommendation,
+                        ) =>
+                          `<li>${escapeHtml(
+                            recommendation,
+                          )}</li>`,
                       )
                       .join("")}
                   </ol>
@@ -665,9 +1376,25 @@ export function generateReportHtml(report: ReportData): string {
           </section>
 
           <section>
-            <h2>7. Fontes, parâmetros e limitações</h2>
+            <h2>
+              ${escapeHtml(
+                t(
+                  "report.section.sources",
+                  {},
+                  locale,
+                ),
+              )}
+            </h2>
 
-            <h3>Fontes dos dados</h3>
+            <h3>
+              ${escapeHtml(
+                t(
+                  "report.sources.title",
+                  {},
+                  locale,
+                ),
+              )}
+            </h3>
 
             ${
               report.dataSources?.length
@@ -676,44 +1403,108 @@ export function generateReportHtml(report: ReportData): string {
                     ${report.dataSources
                       .map(
                         (source) =>
-                          `<li>${escapeHtml(source)}</li>`,
+                          `<li>${escapeHtml(
+                            source,
+                          )}</li>`,
                       )
                       .join("")}
                   </ul>
                 `
-                : "<p>As fontes dos dados não foram informadas.</p>"
+                : `
+                  <p>
+                    ${escapeHtml(
+                      t(
+                        "report.sources.none",
+                        {},
+                        locale,
+                      ),
+                    )}
+                  </p>
+                `
             }
 
             <div class="limitations">
-              <strong>Limitação da análise:</strong>
+              <strong>
+                ${escapeHtml(
+                  t(
+                    "report.limitations.title",
+                    {},
+                    locale,
+                  ),
+                )}
+              </strong>
 
               <p>
-                Os resultados representam uma estimativa produzida a partir
-                das camadas disponíveis, dos parâmetros configurados e do
-                modelo de deslocamento empregado. Condições temporárias,
-                obstáculos não cadastrados e alterações recentes no ambiente
-                urbano podem não estar representados.
+                ${escapeHtml(
+                  t(
+                    "report.limitations.description",
+                    {},
+                    locale,
+                  ),
+                )}
               </p>
             </div>
           </section>
 
           <footer class="report-footer">
-            Relatório produzido automaticamente pelo plugin de análise de
-            ${escapeHtml(mobility.footerLabel)}.
+            ${escapeHtml(
+              t(
+                "report.footer.generated",
+                {
+                  analysis:
+                    mobility.footerLabel,
+                },
+                locale,
+              ),
+            )}
 
-            Versão do plugin:
-            ${escapeHtml(identification.pluginVersion ?? "não informada")}.
+            ${escapeHtml(
+              t(
+                "report.footer.pluginVersion",
+                {
+                  version:
+                    identification
+                      .pluginVersion
+                    ?? t(
+                      "common.notProvided",
+                      {},
+                      locale,
+                    ),
+                },
+                locale,
+              ),
+            )}
 
-            Versão do algoritmo:
-            ${escapeHtml(identification.algorithmVersion ?? "não informada")}.
+            ${escapeHtml(
+              t(
+                "report.footer.algorithmVersion",
+                {
+                  version:
+                    identification
+                      .algorithmVersion
+                    ?? t(
+                      "common.notProvided",
+                      {},
+                      locale,
+                    ),
+                },
+                locale,
+              ),
+            )}
           </footer>
         </main>
+
         <script>
-            document
-                .getElementById("download-pdf-button")
-                ?.addEventListener("click", function () {
+          document
+            .getElementById(
+              "download-pdf-button"
+            )
+            ?.addEventListener(
+              "click",
+              function () {
                 window.print();
-                });
+              }
+            );
         </script>
       </body>
     </html>
@@ -723,19 +1514,27 @@ export function generateReportHtml(report: ReportData): string {
 export function openPrintableReport(
   report: ReportData,
 ): void {
-  const reportWindow = window.open("", "_blank");
+  const reportWindow =
+    window.open(
+      "",
+      "_blank",
+    );
 
   if (!reportWindow) {
     throw new Error(
-      "Não foi possível abrir o relatório. " +
-      "Verifique se o navegador bloqueou a nova janela.",
+      t(
+        "report.error.popupBlocked",
+        {},
+        report.locale
+          ?? DEFAULT_LOCALE,
+      ),
     );
   }
 
-  // Evita que a nova janela mantenha acesso à janela original.
   reportWindow.opener = null;
 
-  const html = generateReportHtml(report);
+  const html =
+    generateReportHtml(report);
 
   reportWindow.document.open();
   reportWindow.document.write(html);

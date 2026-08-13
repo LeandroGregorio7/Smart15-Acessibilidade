@@ -2,6 +2,23 @@
 import { openPrintableReport } from "./report/report.generator";
 import { adaptSimulationToReport } from "./report/report.adapter";
 import { captureMapAsDataUrl } from "./report/map.capture";
+
+import {
+  getLocale,
+  setLocale,
+  subscribeLocale,
+  t,
+  translateDocument,
+} from "./i18n/i18n";
+
+import type {
+  SupportedLocale,
+} from "./i18n/i18n.types";
+
+import type {
+  TranslationKey,
+} from "./i18n/translations";
+
 const painelHtml = `
   <style>
     #smart15-main-wrapper { transition: all 0.3s ease; height: 100vh; overflow-y: auto; padding: 20px; font-family: Arial, sans-serif; box-sizing: border-box; }
@@ -88,45 +105,72 @@ const painelHtml = `
     <div id="smart15HelpBackdrop" class="smart15-modal-backdrop s15-help-bg"></div>
     
     <div id="smart15HelpModal" class="smart15-modal">
-      <h2 class="s15-title" style="margin-top: 0;">Metodologia e Dicionário (Smart-15)</h2>
-      <div class="s15-text" style="font-size: 13px; line-height: 1.6;">
-          <p><b>1. Projeção Métrica Georreferenciada:</b> A malha viária é projetada de WGS84 (Graus) para UTM local (Metros) antes do roteamento, garantindo distâncias e áreas isócronas matematicamente precisas.</p>
-          <p><b>2. Isócronas e Dilatação Morfológica:</b> Geração de polígonos baseados na distância percorrida por tempo na rede de ruas reais (NetworkX/OSMnx). Um buffer morfológico é aplicado às arestas para fechamento de lacunas, criando manchas contínuas de acesso.</p>
-          <p><b>3. Indexação Hexagonal (H3):</b> Utiliza a biblioteca matemática H3 para tesselação da área (Resolução 10), permitindo análises estatísticas uniformes e comparáveis sobre o território.</p>
-          <p><b>4. Classificação Inteligente (IA):</b> Algoritmo OBIA / Decision Tree treinado via amostras vetoriais do utilizador para detectar áreas de interesse via Índices Radiométricos (NGRDI) lidos da ortofoto.</p>
-          <p><b>5. Função de Tobler (DEM):</b> Incorpora Modelos Digitais de Elevação para reduzir ou aumentar a velocidade teórica de caminhada e ciclismo com base na inclinação real do terreno.</p>
-          <p><b>6. Penalidade Térmica (LST):</b> Fator de atrito térmico derivado de imagens infravermelhas (Temperatura da Superfície), reduzindo a mobilidade de grupos vulneráveis em zonas de calor extremo.</p>
-          
-          <hr class="s15-border" style="margin: 15px 0;">
-          <h3 class="s15-title" style="font-size: 14px; margin-bottom: 8px;">Bibliografia Base:</h3>
-          <ul style="margin-top: 0; padding-left: 20px;">
-              <li style="margin-bottom: 4px;">BOEING, G. (2017). <i>OSMnx: New methods for acquiring, constructing, analyzing, and visualizing complex street networks</i>. Computers, Environment and Urban Systems.</li>
-              <li style="margin-bottom: 4px;">BREIMAN, L., et al. (1984). <i>Classification and Regression Trees</i>. Wadsworth. (OBIA / Decision Trees).</li>
-              <li style="margin-bottom: 4px;">TOBLER, W. (1993). <i>Three presentations on geographical analysis and modeling</i>. National Center for Geographic Information and Analysis.</li>
-              <li style="margin-bottom: 4px;">UBER TECHNOLOGIES. (2018). <i>H3: Uber’s Hexagonal Hierarchical Spatial Index</i>.</li>
-          </ul>
+      <h2
+        class="s15-title"
+        style="margin-top: 0;"
+        data-i18n="help.methodology.title"
+      >
+        Methodology and glossary (Smart-15)
+      </h2>
+
+      <div
+        class="s15-text"
+        style="font-size: 13px; line-height: 1.6;"
+        data-i18n-html="help.methodology.content"
+      >
       </div>
-      <button id="btnCloseHelp" style="padding: 10px 15px; background: #e53e3e; color: white; border: none; border-radius: 4px; cursor: pointer; float: right; margin-top: 10px; font-weight: bold;">Fechar Dicionário</button>
+
+      <button
+        id="btnCloseHelp"
+        data-i18n="help.methodology.close"
+        style="
+          padding: 10px 15px;
+          background: #e53e3e;
+          color: white;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+          float: right;
+          margin-top: 10px;
+          font-weight: bold;
+        "
+      >
+        Close glossary
+      </button>
     </div>
 
     <div id="smart15InstrucoesModal" class="smart15-modal">
-      <h2 style="color:#166534; margin-top: 0;">Como Utilizar o Smart-15</h2>
-      <div class="s15-text" style="font-size: 13px; line-height: 1.6;">
-          <p><b>1. Ordem das Camadas (IMPORTANTE):</b> O motor gráfico do painel desenha o mapa sequencialmente. Para uma camada ficar <b>POR CIMA</b>, você deve movê-la para <b>BAIXO</b> na lista de camadas.</p>
-          <p><b>2. Rasters (Caixa 9):</b> Se deixar no "Cloud Automático", o painel utilizará as APIs do Microsoft Planetary Computer e da AWS.</p>
-          <p><b>3. Visualização 3D:</b> Marque "Ativar Extrusão 3D na Tela", segure o <b>BOTÃO DIREITO</b> do rato e arraste-o para inclinar a câmara.</p>
-          <p><b>4. Recorte Visual (Máscara):</b> Na Caixa 7, ative "✂️ Isolar Município" para esconder o entorno e focar apenas na sua geometria de estudo.</p>
-          <p><b>5. Consultar Dados (Popups):</b> Ligue a caixa " ATIVAR IDENTIFICADOR (i)". Passe o rato sobre qualquer geometria para ver os dados de Tempo, Perfil, Categorias de Equipamentos OSM e Classificações da IA. Para ler valores exatos de Satélite (Calor/Relevo), use a <b>Legenda Dinâmica Exata</b> na secção 7.</p>
-          <p><b>6. Cortina Comparativa (Swipe):</b> Ao ativar a cortina, a tela é dividida. Para comparar, oculte camadas no painel (ícone de olho). O lado <b>Esquerdo</b> ficará congelado com o cenário anterior, e o <b>Direito</b> refletirá suas mudanças.</p>
-          <p><b>7. Exportar Relatório:</b> Clique no botão "Exportar Relatório" para gerar um PDF com o mapa, gráficos e dados do estudo.</p>
-          <p><b>8. Exportar Dados:</b> Clique no botão "Exportar Dados" para baixar os dados em formato GeoJSON, CSV ou Shapefile.</p>
-          <p> 
-          <b>9. A IA e as Amostras (Desenhar ou Subir GeoJSON):</b><br>
-            • <b>Desenhar na tela:</b> Mude o mapa de fundo para <i>Satélite</i> na Caixa 2, escolha a classe e desenhe sobre o mapa (botão DIREITO fecha o polígono).<br>
-            • <b>Subir GeoJSON externo:</b> A tabela de atributos do seu arquivo <u>OBRIGATORIAMENTE</u> deve ter a coluna <code>classe</code> preenchida apenas com os <b>números de 1 a 6</b> (1-Asfalto, 2-Calçada, 3-Construção, 4-Árvore, 5-Grama, 6-Terra). Se quiser colocar o nome por extenso, crie uma coluna separada chamada <code>descritor</code>.
-          </p>
+      <h2
+        style="color:#166534; margin-top: 0;"
+        data-i18n="help.instructions.title"
+      >
+        How to use Smart-15
+      </h2>
+
+      <div
+        class="s15-text"
+        style="font-size: 13px; line-height: 1.6;"
+        data-i18n-html="help.instructions.content"
+      >
       </div>
-      <button id="btnCloseInstrucoes" style="padding: 10px 15px; background: #e53e3e; color: white; border: none; border-radius: 4px; cursor: pointer; float: right; margin-top: 10px; font-weight: bold;">Fechar Instruções</button>
+
+      <button
+        id="btnCloseInstrucoes"
+        data-i18n="help.instructions.close"
+        style="
+          padding: 10px 15px;
+          background: #e53e3e;
+          color: white;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+          float: right;
+          margin-top: 10px;
+          font-weight: bold;
+        "
+      >
+        Close instructions
+      </button>
     </div>
 
     <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #2b6cb0; padding-bottom: 12px; margin-bottom: 20px;" class="s15-border">
@@ -135,131 +179,419 @@ const painelHtml = `
         <p class="s15-text" style="font-size: 11px; margin: 0;">Geo-Analytics Metrics v2.0</p>
       </div>
       <div style="display: flex; gap: 6px; flex-direction: column; align-items: flex-end;">
+
+
         <button id="btnToggleTheme" style="background: transparent; color: inherit; border: 1px solid currentColor; padding: 4px 8px; border-radius: 4px; cursor: pointer; display:flex; align-items:center; font-size:10px;">
-          <svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-moon"/></svg> Modo Escuro
+          <svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-moon"/></svg> <span data-i18n="theme.dark">Modo Escuro</span>
         </button>
         <div style="display:flex; gap: 4px;">
             <button id="btnOpenHelp" style="background: #3182ce; color: white; border: none; padding: 6px 8px; border-radius: 4px; font-size: 10px; cursor: pointer; display:flex; align-items:center;">
-              <svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-book"/></svg> Metodologia
+              <svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-book"/></svg> <span data-i18n="ui.methodology">Metodologia</span>
             </button>
             <button id="btnOpenInstrucoes" style="background: #166534; color: white; border: none; padding: 6px 8px; border-radius: 4px; font-size: 10px; cursor: pointer; display:flex; align-items:center;">
-              <svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-info"/></svg> Ajuda / 3D
+              <svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-info"/></svg> <span data-i18n="ui.help">Ajuda / 3D</span>
             </button>
+            <select
+              id="smart15Language"
+              aria-label="Idioma"
+              style="
+                background: transparent;
+                color: inherit;
+                border: 1px solid currentColor;
+                padding: 4px 6px;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 10px;
+              "
+            >
+              <option value="pt-BR">PT</option>
+              <option value="en">EN</option>
+            </select>
         </div>
       </div>
     </div>
 
     <div style="margin-bottom: 24px;">
-      <label class="s15-label" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 8px;">1. Limite Geográfico</label>
+      <label class="s15-label" data-i18n="ui.section.boundary" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 8px;">1. Geographic boundary</label>
       <div style="display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap;">
         <input type="file" id="hiddenFileInput" accept=".geojson,.kml,.shp,.zip" style="display: none;" />
-        <button id="btnUploadArea" class="s15-btn-normal" style="flex: 1; padding: 6px; border-radius: 4px; font-size: 10px; cursor: pointer; font-weight: bold; display:flex; align-items:center; justify-content:center;">
-            <svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-import"/></svg> Importar
+
+        <button
+          id="btnUploadArea"
+          class="s15-btn-normal"
+          style="flex: 1; padding: 6px; border-radius: 4px; font-size: 10px; cursor: pointer; font-weight: bold; display:flex; align-items:center; justify-content:center;"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            class="s15-icon s15-icon-btn"
+          >
+            <use href="#icon-import"/>
+          </svg>
+
+          <span data-i18n="action.import">
+            Import
+          </span>
         </button>
-        <button id="btnDrawRect" class="draw-tool" title="Desenhar Retângulo" style="flex: 1; padding: 6px; border-radius: 4px; cursor: pointer; display:flex; justify-content:center;">
+
+        <button id="btnDrawRect" class="draw-tool" data-i18n-title="ui.draw.rectangle"title="Desenhar Retângulo" style="flex: 1; padding: 6px; border-radius: 4px; cursor: pointer; display:flex; justify-content:center;">
             <svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-rect"/></svg>
         </button>
-        <button id="btnDrawPoly" class="draw-tool" title="Desenhar Polígono" style="flex: 1; padding: 6px; border-radius: 4px; cursor: pointer; display:flex; justify-content:center;">
+        <button id="btnDrawPoly" class="draw-tool" data-i18n-title="ui.draw.polygon" title="Desenhar Polígono" style="flex: 1; padding: 6px; border-radius: 4px; cursor: pointer; display:flex; justify-content:center;">
             <svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-poly"/></svg>
         </button>
-        <button id="btnDrawCircle" class="draw-tool" title="Desenhar Raio" style="flex: 1; padding: 6px; border-radius: 4px; cursor: pointer; display:flex; justify-content:center;">
+        <button id="btnDrawCircle" class="draw-tool" data-i18n-title="ui.draw.radius" title="Desenhar Raio" style="flex: 1; padding: 6px; border-radius: 4px; cursor: pointer; display:flex; justify-content:center;">
             <svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-circle"/></svg>
         </button>
-        <button id="btnReset" title="Limpar Geometria" style="flex: 1; padding: 6px; background-color: #fed7d7; border: 1px solid #fc8181; border-radius: 4px; cursor: pointer; display:flex; justify-content:center; color:#c53030; transition: 0.2s;">
+        <button id="btnReset" data-i18n-title="ui.draw.clear" title="Limpar Geometria" style="flex: 1; padding: 6px; background-color: #fed7d7; border: 1px solid #fc8181; border-radius: 4px; cursor: pointer; display:flex; justify-content:center; color:#c53030; transition: 0.2s;">
             <svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-trash"/></svg>
         </button>
       </div>
-      <div id="areaStatus" class="s15-text" style="font-size: 11px; margin-top: 6px; font-style: italic;">Nenhum limite definido</div>
+      <div id="areaStatus" class="s15-text" data-i18n="area.noneDefined" style="font-size: 11px; margin-top: 6px; font-style: italic;">Nenhum limite definido</div>
       <div id="areaCoords" style="font-family: monospace; font-size: 10px; color: #c05621; margin-top: 4px; word-break: break-all;"></div>
     </div>
 
     <div style="margin-bottom: 24px; border-top: 1px solid; padding-top: 16px;" class="s15-border">
-      <label class="s15-label" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 4px;">2. Amostras Locais (Treinamento IA)</label>
+      <label class="s15-label" data-i18n="ui.section.samples"style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 4px;">2. Local samples (AI training)</label>
 
       <div style="margin-bottom: 10px; background-color: #f0fdf4; border: 1px dashed #4ade80; padding: 8px; border-radius: 4px;">
-        <label style="font-size: 11px; font-weight: bold; color: #166534; display: flex; align-items: center; margin-bottom: 4px;">
-          <svg viewBox="0 0 24 24" class="s15-icon"><use href="#icon-map"/></svg> Mapa de fundo
-        </label>
+      <label
+        style="font-size: 11px; font-weight: bold; color: #166534; display: flex; align-items: center; margin-bottom: 4px;"
+      >
+        <svg viewBox="0 0 24 24" class="s15-icon">
+          <use href="#icon-map"/>
+        </svg>
+
+        <span data-i18n="ui.basemap.label">
+          Background map
+        </span>
+      </label>
         <select id="basemapSelect" style="width: 100%; padding: 6px; border-radius: 4px; border: 1px solid #4ade80; font-size: 11px; cursor: pointer;">
-          <option value="default">Rua / padrão do GeoLibre</option>
-          <option value="satellite">Satélite (Esri World Imagery)</option>
+          <option value="default" data-i18n="ui.basemap.default">Rua / padrão do GeoLibre</option>
+          <option value="satellite" data-i18n="ui.basemap.satellite">Satélite (Esri World Imagery)</option>
         </select>
-        <span style="font-size: 9px; color: #1c4532; display:block; margin-top:4px;">Use o satélite como referência para desenhar árvores, telhados e demais classes.</span>
+        <span style="font-size: 9px; color: #1c4532; display:block; margin-top:4px;" data-i18n="ui.basemap.description">Use o satélite como referência para desenhar árvores, telhados e demais classes.</span>
       </div>
 
       <div style="display: flex; flex-direction: column; gap: 6px;">
         <input type="file" id="sampleFileInput" accept=".geojson,.json" style="display: none;" />
-        <button id="btnUploadSamples" class="s15-card s15-text" style="width: 100%; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: 500; cursor: pointer; display:flex; align-items:center; justify-content:center;">
-          <svg viewBox="0 0 24 24" class="s15-icon"><use href="#icon-import"/></svg> Enviar arquivo de amostras
+
+        <button
+          id="btnUploadSamples"
+          class="s15-card s15-text"
+          style="width: 100%; padding: 8px; border-radius: 4px; font-size: 12px; font-weight: 500; cursor: pointer; display:flex; align-items:center; justify-content:center;"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            class="s15-icon"
+          >
+            <use href="#icon-import"/>
+          </svg>
+
+          <span data-i18n="ui.samples.upload">
+            Upload sample file
+          </span>
         </button>
 
         <div style="display: flex; gap: 4px; align-items: center;">
           <select id="drawSampleClass" class="s15-border s15-text" style="flex: 2; padding: 6px; border-radius: 4px; border-width: 1px; font-size: 11px; cursor: pointer; background-color: #fff;">
-            <option value="1">1 - Asfalto / Via</option>
-            <option value="2">2 - Calçada / Passeio</option>
-            <option value="3">3 - Construção / Telhado</option>
-            <option value="4">4 - Árvore</option>
-            <option value="5">5 - Grama / Rasteira</option>
-            <option value="6">6 - Terra Exposta</option>
+            <option value="1" data-i18n="sampleClass.asphalt">1 - Asfalto / Via</option>
+            <option value="2" data-i18n="sampleClass.sidewalk">2 - Calçada / Passeio</option>
+            <option value="3" data-i18n="sampleClass.building">3 - Construção / Telhado</option>
+            <option value="4" data-i18n="sampleClass.tree">4 - Árvore</option>
+            <option value="5" data-i18n="sampleClass.grass">5 - Grama / Rasteira</option>
+            <option value="6" data-i18n="sampleClass.bareSoil">6 - Terra Exposta</option>
           </select>
-          <button id="btnDrawSample" class="draw-tool" title="Desenhar amostra no mapa" style="flex: 1; padding: 6px; border-radius: 4px; cursor: pointer; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:bold;">
-            <svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-poly"/></svg> Desenhar
+
+          <button
+            id="btnDrawSample"
+            class="draw-tool"
+            data-i18n-title="ui.samples.drawTitle"
+            title="Draw sample on map"
+            style="flex: 1; padding: 6px; border-radius: 4px; cursor: pointer; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:bold;"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              class="s15-icon s15-icon-btn"
+            >
+              <use href="#icon-poly"/>
+            </svg>
+
+            <span data-i18n="ui.samples.draw">
+              Draw
+            </span>
           </button>
+
         </div>
       </div>
 
-      <div id="sampleStatus" class="s15-text" style="font-size: 11px; margin-top: 6px; font-style: italic;">Nenhuma amostra desenhada ou carregada</div>
+      <div id="sampleStatus" class="s15-text" data-i18n="ui.samples.none" style="font-size: 11px; margin-top: 6px; font-style: italic;">Nenhuma amostra desenhada ou carregada</div>
       <div id="sampleCoords" style="font-family: monospace; font-size: 10px; color: #c05621; margin-top: 4px; word-break: break-all;"></div>
     </div>
 
     <div style="margin-bottom: 24px;">
-      <label class="s15-label" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 8px;">3. Destinos OSM (Subcategorias)</label>
+      <label class="s15-label" data-i18n="ui.section.destinations" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 8px;">3. OSM Destinations (Subcategories)</label>
       <div class="s15-card" style="display: flex; flex-direction: column; gap: 4px; padding: 12px; border-radius: 4px;">
         <div class="s15-text s15-border" style="font-size: 11px; font-weight: bold; margin-bottom: 2px; border-bottom: 1px solid; padding-bottom: 2px; display:flex; align-items:center;">
-          <svg viewBox="0 0 24 24" class="s15-icon s15-icon-fill" style="color:#e53e3e;"><use href="#icon-circle-fill"/></svg> Essenciais (Peso 3)
+          <svg viewBox="0 0 24 24" class="s15-icon s15-icon-fill" style="color:#e53e3e;"><use href="#icon-circle-fill"/></svg> <span data-i18n="ui.poi.essential">Essential (Weight 3)</span>
         </div>
-        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;"><input type="checkbox" class="osm-target" value="escolas" checked style="margin-right: 8px;" /> Escolas e Creches</label>
-        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;"><input type="checkbox" class="osm-target" value="hospitais" checked style="margin-right: 8px;" /> Hospitais e Clínicas</label>
-        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;"><input type="checkbox" class="osm-target" value="mercados" style="margin-right: 8px;" /> Mercados e Padarias</label>
+        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;">
+          <input
+            type="checkbox"
+            class="osm-target"
+            value="escolas"
+            checked
+            style="margin-right: 8px;"
+          />
+          <span data-i18n="target.escolas">
+            Schools and childcare facilities
+          </span>
+        </label>
+
+        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;">
+          <input
+            type="checkbox"
+            class="osm-target"
+            value="hospitais"
+            checked
+            style="margin-right: 8px;"
+          />
+          <span data-i18n="target.hospitais">
+            Hospitals and clinics
+          </span>
+        </label>
+
+        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;">
+          <input
+            type="checkbox"
+            class="osm-target"
+            value="mercados"
+            style="margin-right: 8px;"
+          />
+          <span data-i18n="target.mercados">
+            Markets and bakeries
+          </span>
+        </label>
 
         <div class="s15-text s15-border" style="font-size: 11px; font-weight: bold; margin-top: 8px; margin-bottom: 2px; border-bottom: 1px solid; padding-bottom: 2px; display:flex; align-items:center;">
-          <svg viewBox="0 0 24 24" class="s15-icon s15-icon-fill" style="color:#dd6b20;"><use href="#icon-circle-fill"/></svg> Importantes (Peso 2)
+          <svg viewBox="0 0 24 24" class="s15-icon s15-icon-fill" style="color:#dd6b20;">
+            <use href="#icon-circle-fill"/>
+          </svg>
+          <span data-i18n="ui.poi.important">
+            Important (Weight 2)
+          </span>
         </div>
-        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;"><input type="checkbox" class="osm-target" value="parques" checked style="margin-right: 8px;" /> Parques e Praças</label>
-        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;"><input type="checkbox" class="osm-target" value="cultura" style="margin-right: 8px;" /> Centros Culturais / Museus</label>
+
+        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;">
+          <input
+            type="checkbox"
+            class="osm-target"
+            value="parques"
+            checked
+            style="margin-right: 8px;"
+          />
+          <span data-i18n="target.parques">
+            Parks and public squares
+          </span>
+        </label>
+
+        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;">
+          <input
+            type="checkbox"
+            class="osm-target"
+            value="cultura"
+            style="margin-right: 8px;"
+          />
+          <span data-i18n="target.cultura">
+            Cultural facilities and museums
+          </span>
+        </label>
 
         <div class="s15-text s15-border" style="font-size: 11px; font-weight: bold; margin-top: 8px; margin-bottom: 2px; border-bottom: 1px solid; padding-bottom: 2px; display:flex; align-items:center;">
-          <svg viewBox="0 0 24 24" class="s15-icon s15-icon-fill" style="color:#ecc94b;"><use href="#icon-circle-fill"/></svg> Complementares (Peso 1)
+          <svg viewBox="0 0 24 24" class="s15-icon s15-icon-fill" style="color:#ecc94b;">
+            <use href="#icon-circle-fill"/>
+          </svg>
+          <span data-i18n="ui.poi.complementary">
+            Complementary (Weight 1)
+          </span>
         </div>
-        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;"><input type="checkbox" class="osm-target" value="comercio" style="margin-right: 8px;" /> Comércio Local</label>
-        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;"><input type="checkbox" class="osm-target" value="academias" style="margin-right: 8px;" /> Academias e Ginásios</label>
+
+        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;">
+          <input
+            type="checkbox"
+            class="osm-target"
+            value="comercio"
+            style="margin-right: 8px;"
+          />
+          <span data-i18n="target.comercio">
+            Local retail and services
+          </span>
+        </label>
+
+        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;">
+          <input
+            type="checkbox"
+            class="osm-target"
+            value="academias"
+            style="margin-right: 8px;"
+          />
+          <span data-i18n="target.academias">
+            Gyms and sports facilities
+          </span>
+        </label>
       </div>
     </div>
 
     <div style="margin-bottom: 24px;">
-      <label class="s15-label" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 4px;">4. Simulação Múltipla (Velocidades)</label>
-      <div class="s15-card" style="display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 4px;">
-        <div class="s15-text" style="font-size: 11px; font-weight: bold; margin-bottom: 2px; display:flex; align-items:center;"><svg viewBox="0 0 24 24" class="s15-icon"><use href="#icon-pedestrian"/></svg> A pé (Pedestres)</div>
-        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;"><input type="checkbox" class="perfil-target" value="adulto_pedestre" checked style="margin-right: 8px;" /> Adulto (4.5 km/h)</label>
-        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;"><input type="checkbox" class="perfil-target" value="pedestre_crianca" style="margin-right: 8px;" /> Criança (3.5 km/h)</label>
-        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;"><input type="checkbox" class="perfil-target" value="pedestre_idoso" style="margin-right: 8px;" /> Idoso (3.0 km/h)</label>
-        <div class="s15-text" style="font-size: 11px; font-weight: bold; margin-top: 6px; margin-bottom: 2px; display:flex; align-items:center;"><svg viewBox="0 0 24 24" class="s15-icon"><use href="#icon-bike"/></svg> Ciclismo (Bicicletas)</div>
-        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;"><input type="checkbox" class="perfil-target" value="adulto_bike" checked style="margin-right: 8px;" /> Adulto (15.0 km/h)</label>
-        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;"><input type="checkbox" class="perfil-target" value="ciclista_crianca" style="margin-right: 8px;" /> Criança (11.0 km/h)</label>
-        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;"><input type="checkbox" class="perfil-target" value="ciclista_idoso" style="margin-right: 8px;" /> Idoso (10.0 km/h)</label>
+      <label
+        class="s15-label"
+        data-i18n="ui.section.profiles"
+        style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 8px;"
+      >
+        4. Multiple simulation (speeds)
+      </label>
+
+      <div
+        class="s15-card"
+        style="display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 4px;"
+      >
+        <div
+          class="s15-text"
+          style="font-size: 11px; font-weight: bold; margin-bottom: 2px; display:flex; align-items:center;"
+        >
+          <svg viewBox="0 0 24 24" class="s15-icon">
+            <use href="#icon-pedestrian"/>
+          </svg>
+
+          <span data-i18n="ui.profile.walking">
+            Walking
+          </span>
+        </div>
+
+        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;">
+          <input
+            type="checkbox"
+            class="perfil-target"
+            value="adulto_pedestre"
+            checked
+            style="margin-right: 8px;"
+          />
+          <span data-i18n="ui.profile.walkingAdult">
+            Adult (4.5 km/h)
+          </span>
+        </label>
+
+        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;">
+          <input
+            type="checkbox"
+            class="perfil-target"
+            value="pedestre_crianca"
+            style="margin-right: 8px;"
+          />
+          <span data-i18n="ui.profile.walkingChild">
+            Child (3.5 km/h)
+          </span>
+        </label>
+
+        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;">
+          <input
+            type="checkbox"
+            class="perfil-target"
+            value="pedestre_idoso"
+            style="margin-right: 8px;"
+          />
+          <span data-i18n="ui.profile.walkingOlderAdult">
+            Older adult (3.0 km/h)
+          </span>
+        </label>
+
+        <div
+          class="s15-text"
+          style="font-size: 11px; font-weight: bold; margin-top: 6px; margin-bottom: 2px; display:flex; align-items:center;"
+        >
+          <svg viewBox="0 0 24 24" class="s15-icon">
+            <use href="#icon-bike"/>
+          </svg>
+
+          <span data-i18n="ui.profile.cycling">
+            Cycling
+          </span>
+        </div>
+
+        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;">
+          <input
+            type="checkbox"
+            class="perfil-target"
+            value="adulto_bike"
+            checked
+            style="margin-right: 8px;"
+          />
+          <span data-i18n="ui.profile.cyclingAdult">
+            Adult (15.0 km/h)
+          </span>
+        </label>
+
+        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;">
+          <input
+            type="checkbox"
+            class="perfil-target"
+            value="ciclista_crianca"
+            style="margin-right: 8px;"
+          />
+          <span data-i18n="ui.profile.cyclingChild">
+            Child (11.0 km/h)
+          </span>
+        </label>
+
+        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;">
+          <input
+            type="checkbox"
+            class="perfil-target"
+            value="ciclista_idoso"
+            style="margin-right: 8px;"
+          />
+          <span data-i18n="ui.profile.cyclingOlderAdult">
+            Older adult (10.0 km/h)
+          </span>
+        </label>
       </div>
     </div>
 
     <div style="margin-bottom: 24px;">
-      <label class="s15-label" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 4px;">5. Variáveis Ambientais (Rasters)</label>
+      <label class="s15-label" data-i18n="ui.section.environment" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 4px;">5. Environmental variables (rasters)</label>
       <div class="s15-card" style="display: flex; flex-direction: column; gap: 12px; padding: 12px; border-radius: 4px;">
         
         <div>
-          <label class="s15-text" style="font-size: 11px; font-weight: bold; display: flex; align-items:center; margin-bottom: 4px;"><svg viewBox="0 0 24 24" class="s15-icon"><use href="#icon-leaf"/></svg> Ortofoto RGB / Vegetação (FIS)</label>
+          <label
+            class="s15-text"
+            style="font-size: 11px; font-weight: bold; display: flex; align-items:center; margin-bottom: 4px;"
+          >
+            <svg viewBox="0 0 24 24" class="s15-icon">
+              <use href="#icon-leaf"/>
+            </svg>
+
+            <span data-i18n="ui.environment.vegetation">
+              RGB orthophoto / Vegetation (FIS)
+            </span>
+          </label>
           <div style="display: flex; gap: 4px;">
-            <select id="modoVeg" class="s15-border s15-card s15-text" style="flex: 1; padding: 6px; border-radius: 4px; border-width: 1px; font-size: 12px; cursor: pointer;">
-              <option value="auto_sentinel">Cloud Automático (Sentinel-2)</option>
-              <option value="manual">Upload Local (.tif)</option>
+            <select
+              id="modoVeg"
+              class="s15-border s15-card s15-text"
+              style="flex: 1; padding: 6px; border-radius: 4px; border-width: 1px; font-size: 12px; cursor: pointer;"
+            >
+              <option
+                value="auto_sentinel"
+                data-i18n="ui.environment.cloudSentinel"
+              >
+                Automatic cloud (Sentinel-2)
+              </option>
+
+              <option
+                value="manual"
+                data-i18n="ui.environment.localUpload"
+              >
+                Local upload (.tif)
+              </option>
             </select>
             <input type="file" id="fileVeg" accept=".tif,.tiff" style="display: none;" />
             <button id="btnFileVeg" class="s15-btn-normal" style="display: none; padding: 6px; border-radius: 4px; font-size: 11px; cursor: pointer; font-weight: bold;">Escolher</button>
@@ -268,11 +600,37 @@ const painelHtml = `
         </div>
 
         <div>
-          <label class="s15-text" style="font-size: 11px; font-weight: bold; display: flex; align-items:center; margin-bottom: 4px; color: #e53e3e;"><svg viewBox="0 0 24 24" class="s15-icon"><use href="#icon-thermometer"/></svg> Camada Térmica LST (FIT)</label>
+          <label
+            class="s15-text"
+            style="font-size: 11px; font-weight: bold; display: flex; align-items:center; margin-bottom: 4px; color: #e53e3e;"
+          >
+            <svg viewBox="0 0 24 24" class="s15-icon">
+              <use href="#icon-thermometer"/>
+            </svg>
+
+            <span data-i18n="ui.environment.temperature">
+              LST thermal layer (FIT)
+            </span>
+          </label>
           <div style="display: flex; gap: 4px;">
-            <select id="modoTemp" class="s15-border s15-card s15-text" style="flex: 1; padding: 6px; border-radius: 4px; border-width: 1px; font-size: 12px; cursor: pointer;">
-              <option value="auto_pc">Cloud Automático (Planetary Computer)</option>
-              <option value="manual">Upload Local (.tif)</option>
+            <select
+              id="modoTemp"
+              class="s15-border s15-card s15-text"
+              style="flex: 1; padding: 6px; border-radius: 4px; border-width: 1px; font-size: 12px; cursor: pointer;"
+            >
+              <option
+                value="auto_pc"
+                data-i18n="ui.environment.cloudPlanetary"
+              >
+                Automatic cloud (Planetary Computer)
+              </option>
+
+              <option
+                value="manual"
+                data-i18n="ui.environment.localUpload"
+              >
+                Local upload (.tif)
+              </option>
             </select>
             <input type="file" id="fileTemp" accept=".tif,.tiff" style="display: none;" />
             <button id="btnFileTemp" class="s15-btn-normal" style="display: none; padding: 6px; border-radius: 4px; font-size: 11px; cursor: pointer; font-weight: bold;">Escolher</button>
@@ -281,11 +639,37 @@ const painelHtml = `
         </div>
 
         <div>
-          <label class="s15-text" style="font-size: 11px; font-weight: bold; display: flex; align-items:center; margin-bottom: 4px;"><svg viewBox="0 0 24 24" class="s15-icon"><use href="#icon-mountain"/></svg> Camada de Relevo DEM (FID)</label>
+          <label
+            class="s15-text"
+            style="font-size: 11px; font-weight: bold; display: flex; align-items:center; margin-bottom: 4px;"
+          >
+            <svg viewBox="0 0 24 24" class="s15-icon">
+              <use href="#icon-mountain"/>
+            </svg>
+
+            <span data-i18n="ui.environment.dem">
+              DEM elevation layer (FID)
+            </span>
+          </label>
           <div style="display: flex; gap: 4px;">
-            <select id="modoDem" class="s15-border s15-card s15-text" style="flex: 1; padding: 6px; border-radius: 4px; border-width: 1px; font-size: 12px; cursor: pointer;">
-              <option value="auto">Cloud Automático (Copernicus)</option>
-              <option value="manual">Upload Local (.tif)</option>
+            <select
+              id="modoDem"
+              class="s15-border s15-card s15-text"
+              style="flex: 1; padding: 6px; border-radius: 4px; border-width: 1px; font-size: 12px; cursor: pointer;"
+            >
+              <option
+                value="auto"
+                data-i18n="ui.environment.cloudCopernicus"
+              >
+                Automatic cloud (Copernicus)
+              </option>
+
+              <option
+                value="manual"
+                data-i18n="ui.environment.localUpload"
+              >
+                Local upload (.tif)
+              </option>
             </select>
             <input type="file" id="fileDem" accept=".tif,.tiff" style="display: none;" />
             <button id="btnFileDem" class="s15-btn-normal" style="display: none; padding: 6px; border-radius: 4px; font-size: 11px; cursor: pointer; font-weight: bold;">Escolher</button>
@@ -294,26 +678,126 @@ const painelHtml = `
         </div>
       </div>
     </div>
-
     <div style="margin-bottom: 24px;">
-      <label class="s15-label" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 4px;">6. Exportação e Renderização</label>
-      <div class="s15-card" style="padding: 12px; border-radius: 4px;">
-        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;"><input type="checkbox" class="formato-saida" value="hexagonos" checked style="margin-right: 8px;" /> Processar Tesselações (H3)</label>
-        <label class="s15-text" style="font-size: 13px; display: flex; align-items: center; cursor: pointer;"><input type="checkbox" class="formato-saida" value="isocronas" checked style="margin-right: 8px;" /> Processar Isócronas</label>
-        <hr class="s15-border" style="border-width:0; border-top-width: 1px; margin: 8px 0;">
-        <label style="font-size: 13px; display: flex; align-items: center; color: #c05621; cursor: pointer; font-weight: bold;"><input type="checkbox" id="extrusao3d" checked style="margin-right: 8px; width: 16px; height: 16px;" /> Ativar Extrusão 3D na Tela</label>
-        <hr class="s15-border" style="border-width:0; border-top-width: 1px; margin: 8px 0;">
-        <div class="s15-text" style="font-size: 11px; font-weight: bold; margin-bottom: 4px;">Formatos de Download (.ZIP):</div>
+      <label
+        class="s15-label"
+        data-i18n="ui.section.export"
+        style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 4px;"
+      >
+        6. Export and rendering
+      </label>
+
+      <div
+        class="s15-card"
+        style="padding: 12px; border-radius: 4px;"
+      >
+        <label
+          class="s15-text"
+          style="font-size: 13px; display: flex; align-items: center; cursor: pointer;"
+        >
+          <input
+            type="checkbox"
+            class="formato-saida"
+            value="hexagonos"
+            checked
+            style="margin-right: 8px;"
+          />
+
+          <span data-i18n="ui.export.hexagons">
+            Process H3 tessellations
+          </span>
+        </label>
+
+        <label
+          class="s15-text"
+          style="font-size: 13px; display: flex; align-items: center; cursor: pointer;"
+        >
+          <input
+            type="checkbox"
+            class="formato-saida"
+            value="isocronas"
+            checked
+            style="margin-right: 8px;"
+          />
+
+          <span data-i18n="ui.export.isochrones">
+            Process isochrones
+          </span>
+        </label>
+
+        <hr
+          class="s15-border"
+          style="border-width:0; border-top-width: 1px; margin: 8px 0;"
+        >
+
+        <label
+          style="font-size: 13px; display: flex; align-items: center; color: #c05621; cursor: pointer; font-weight: bold;"
+        >
+          <input
+            type="checkbox"
+            id="extrusao3d"
+            checked
+            style="margin-right: 8px; width: 16px; height: 16px;"
+          />
+
+          <span data-i18n="ui.export.enable3d">
+            Enable 3D extrusion
+          </span>
+        </label>
+
+        <hr
+          class="s15-border"
+          style="border-width:0; border-top-width: 1px; margin: 8px 0;"
+        >
+
+        <div
+          class="s15-text"
+          data-i18n="ui.export.downloadFormats"
+          style="font-size: 11px; font-weight: bold; margin-bottom: 4px;"
+        >
+          Download formats (.ZIP):
+        </div>
+
         <div style="display:flex; gap:10px;">
-            <label class="s15-text" style="font-size: 11px; cursor: pointer;"><input type="checkbox" class="formato-export" value="shp" checked /> SHP</label>
-            <label class="s15-text" style="font-size: 11px; cursor: pointer;"><input type="checkbox" class="formato-export" value="geojson" /> GeoJSON</label>
-            <label class="s15-text" style="font-size: 11px; cursor: pointer;"><input type="checkbox" class="formato-export" value="kml" /> KML</label>
+          <label class="s15-text" style="font-size: 11px; cursor: pointer;">
+            <input
+              type="checkbox"
+              class="formato-export"
+              value="shp"
+              checked
+            />
+            SHP
+          </label>
+
+          <label class="s15-text" style="font-size: 11px; cursor: pointer;">
+            <input
+              type="checkbox"
+              class="formato-export"
+              value="geojson"
+            />
+            GeoJSON
+          </label>
+
+          <label class="s15-text" style="font-size: 11px; cursor: pointer;">
+            <input
+              type="checkbox"
+              class="formato-export"
+              value="kml"
+            />
+            KML
+          </label>
         </div>
       </div>
     </div>
 
-    <button id="btnSimular" style="width: 100%; padding: 14px; background-color: #2b6cb0; color: #ffffff; font-weight: bold; font-size: 14px; border: none; border-radius: 4px; cursor: pointer; text-transform: uppercase;">Executar Simulação Urbana</button>
-    
+    <button
+      id="btnSimular"
+      style="width: 100%; padding: 14px; background-color: #2b6cb0; color: #ffffff; font-weight: bold; font-size: 14px; border: none; border-radius: 4px; cursor: pointer; text-transform: uppercase;"
+    >
+      <span data-i18n="simulation.run">
+        Run urban simulation
+      </span>
+    </button>
     <div id="progressContainer" style="display: none; margin-top: 16px; background-color: #ebf8ff; border: 1px solid #bee3f8; padding: 12px; border-radius: 4px;">
       <div style="display: flex; justify-content: space-between; font-size: 11px; color: #2c5282; margin-bottom: 6px; font-weight: bold;"><span id="progressLabel" style="display:flex; align-items:center;"></span><span id="progressText">0%</span></div>
       <div style="width: 100%; background-color: #cbd5e0; border-radius: 4px; overflow: hidden; height: 12px;"><div id="progressBar" style="width: 0%; height: 100%; background-color: #3182ce; transition: width 0.3s ease-out;"></div></div>
@@ -322,85 +806,142 @@ const painelHtml = `
     <div id="painelPosProcessamento" style="display: none; margin-top: 24px;">
       
       <div class="s15-border" style="margin-bottom: 24px; border-top-width: 2px; border-top-style: solid; padding-top: 16px;">
-        <label class="s15-label" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 8px;">7. Controles Visuais Múltiplos</label>
+        <label class="s15-label" data-i18n="ui.section.visualControls" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 8px;">7. Multiple visual controls</label>
         
-        <div class="s15-text s15-border" style="font-size: 10px; margin-bottom: 6px; border-bottom: 1px solid; padding-bottom: 8px;">
-            <b style="display: block; margin-bottom: 6px;">Legenda de Tempo (Degradê):</b>
-            <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
-                <span style="display:flex; align-items:center;"><span class="legenda-box" style="background:#4ade80;"></span> 2 min</span>
-                <span style="display:flex; align-items:center;"><span class="legenda-box" style="background:#a3e635;"></span> 5 min</span>
-                <span style="display:flex; align-items:center;"><span class="legenda-box" style="background:#facc15;"></span> 10 min</span>
-                <span style="display:flex; align-items:center;"><span class="legenda-box" style="background:#fb923c;"></span> 15 min</span>
-                <span style="display:flex; align-items:center;"><span class="legenda-box" style="background:#ef4444;"></span> >15 min (Penalidade)</span>
-            </div>
+        <div
+          class="s15-text s15-border"
+          style="font-size: 10px; margin-bottom: 6px; border-bottom: 1px solid; padding-bottom: 8px;"
+        >
+          <b
+            data-i18n="ui.visual.timeLegend"
+            style="display: block; margin-bottom: 6px;"
+          >
+            Time legend (gradient):
+          </b>
+
+          <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+            <span style="display:flex; align-items:center;">
+              <span class="legenda-box" style="background:#4ade80;"></span>
+              <span data-i18n="ui.visual.minutes2">2 min</span>
+            </span>
+
+            <span style="display:flex; align-items:center;">
+              <span class="legenda-box" style="background:#a3e635;"></span>
+              <span data-i18n="ui.visual.minutes5">5 min</span>
+            </span>
+
+            <span style="display:flex; align-items:center;">
+              <span class="legenda-box" style="background:#facc15;"></span>
+              <span data-i18n="ui.visual.minutes10">10 min</span>
+            </span>
+
+            <span style="display:flex; align-items:center;">
+              <span class="legenda-box" style="background:#fb923c;"></span>
+              <span data-i18n="ui.visual.minutes15">15 min</span>
+            </span>
+
+            <span style="display:flex; align-items:center;">
+              <span class="legenda-box" style="background:#ef4444;"></span>
+              <span data-i18n="ui.visual.penalty">
+                &gt;15 min (Penalty)
+              </span>
+            </span>
+          </div>
         </div>
 
         <div id="rasterLegendsContainer" class="s15-text s15-border" style="font-size: 10px; margin-bottom: 12px; border-bottom: 1px solid; padding-bottom: 8px; display:none;">
             </div>
 
         <div class="s15-text s15-border" style="font-size: 10px; margin-bottom: 12px; border-bottom: 1px solid; padding-bottom: 8px;">
-            <b style="display: block; margin-bottom: 6px;">Legenda de POIs (OSM):</b>
-            <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
-                <span style="display:flex; align-items:center;"><span class="poi-dot" style="background:#e53e3e;"></span> Escolas</span>
-                <span style="display:flex; align-items:center;"><span class="poi-dot" style="background:#3182ce;"></span> Hospitais</span>
-                <span style="display:flex; align-items:center;"><span class="poi-dot" style="background:#38a169;"></span> Parques</span>
-                <span style="display:flex; align-items:center;"><span class="poi-dot" style="background:#d69e2e;"></span> Mercados</span>
-                <span style="display:flex; align-items:center;"><span class="poi-dot" style="background:#805ad5;"></span> Cultura</span>
-                <span style="display:flex; align-items:center;"><span class="poi-dot" style="background:#00b5d8;"></span> Comércio</span>
-                <span style="display:flex; align-items:center;"><span class="poi-dot" style="background:#dd6b20;"></span> Academias</span>
-            </div>
+            <b style="display: block; margin-bottom: 6px;" data-i18n="ui.visual.poiLegend">POI Legend (OSM):</b>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+            <span style="display:flex; align-items:center;">
+              <span class="poi-dot" style="background:#e53e3e;"></span>
+              <span data-i18n="target.escolas">Schools</span>
+            </span>
+
+            <span style="display:flex; align-items:center;">
+              <span class="poi-dot" style="background:#3182ce;"></span>
+              <span data-i18n="target.hospitais">Hospitals</span>
+            </span>
+
+            <span style="display:flex; align-items:center;">
+              <span class="poi-dot" style="background:#38a169;"></span>
+              <span data-i18n="target.parques">Parks</span>
+            </span>
+
+            <span style="display:flex; align-items:center;">
+              <span class="poi-dot" style="background:#d69e2e;"></span>
+              <span data-i18n="target.mercados">Markets</span>
+            </span>
+
+            <span style="display:flex; align-items:center;">
+              <span class="poi-dot" style="background:#805ad5;"></span>
+              <span data-i18n="target.cultura">Culture</span>
+            </span>
+
+            <span style="display:flex; align-items:center;">
+              <span class="poi-dot" style="background:#00b5d8;"></span>
+              <span data-i18n="target.comercio">Retail</span>
+            </span>
+
+            <span style="display:flex; align-items:center;">
+              <span class="poi-dot" style="background:#dd6b20;"></span>
+              <span data-i18n="target.academias">Sports</span>
+            </span>
+          </div>
         </div>
 
         <div class="s15-card" style="display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 4px;">
           
           <label class="ctrl-chk s15-text" style="color:#d69e2e; font-weight:bold; cursor:pointer; background:#fffff0; padding:6px; border-radius:4px; border:1px solid #ecc94b; display:flex; justify-content:center;">
-             <input type="checkbox" id="toggleInfoMode" style="margin-right:6px;">  ATIVAR IDENTIFICADOR (i)
+             <input type="checkbox" id="toggleInfoMode" style="margin-right:6px;"><span data-i18n="ui.visual.identify">  IDENTIFY FEATURES (i)</span>
           </label>
 
           <label class="ctrl-chk s15-text" style="color:#2b6cb0; font-weight:bold; cursor:pointer; background:#f0f7ff; padding:6px; border-radius:4px; border:1px solid #90cdf4; display:flex; justify-content:center; margin-top:4px;">
-             <input type="checkbox" id="toggleSwipeMode" style="margin-right:6px;"> ↔️ CORTINA COMPARATIVA (SWIPE)
+             <input type="checkbox" id="toggleSwipeMode" style="margin-right:6px;"><span data-i18n="ui.visual.swipe"> ↔️ COMPARISON SWIPE (SWIPE)</span>
           </label>
 
           <div class="ctrl-group" style="margin-top:4px;">
-            <span class="ctrl-label s15-text">Área (Base):</span>
+            <span class="ctrl-label s15-text" data-i18n="ui.visual.baseArea">Area (base):</span>
             <div class="ctrl-tools">
               <input type="color" id="corArea" value="#ecc94b" style="width: 20px; height: 20px; padding: 0; border: none; cursor: pointer;">
               <input type="range" id="opacArea" min="0" max="100" value="10" style="width: 50px;">
-              <label class="ctrl-chk s15-text"><input type="checkbox" id="contornoArea" style="margin-right:2px;"> Contorno</label>
+              <label class="ctrl-chk s15-text"><input type="checkbox" id="contornoArea" style="margin-right:2px;"><span data-i18n="ui.visual.outline">Outline</span></label>
             </div>
           </div>
 
           <div class="ctrl-group">
-            <span class="ctrl-label s15-text">Máscara (Clip):</span>
+            <span class="ctrl-label s15-text" data-i18n="ui.visual.mask">Mask (clip):</span>
             <div class="ctrl-tools" style="justify-content: flex-start;">
-              <label class="ctrl-chk s15-text"><input type="checkbox" id="toggleMascara" style="margin-right:4px;"> ✂️ Isolar Município</label>
+              <label class="ctrl-chk s15-text"><input type="checkbox" id="toggleMascara" style="margin-right:4px;"><span data-i18n="ui.visual.isolateArea">✂️ Isolate study area</span></label>
             </div>
           </div>
 
           <div style="display: flex; flex-direction: column; gap: 4px;">
             <div class="ctrl-group" style="margin-bottom:0;">
-              <span class="ctrl-label s15-text">Amostras IA:</span>
+              <span class="ctrl-label s15-text" data-i18n="ui.visual.aiSamples">AI samples:</span>
               <div class="ctrl-tools">
                 <input type="color" id="corOsm" value="#4a5568" style="width: 20px; height: 20px; padding: 0; border: none; cursor: pointer;">
                 <input type="range" id="opacOsm" min="0" max="100" value="100" style="width: 50px;">
-                <label class="ctrl-chk s15-text"><input type="checkbox" id="contornoOsm" style="margin-right:2px;"> Contorno</label>
+                <label class="ctrl-chk s15-text"><input type="checkbox" id="contornoOsm" style="margin-right:2px;"><span data-i18n="ui.visual.outline">Outline</span></label>
               </div>
             </div>
           </div>
 
           <div class="ctrl-group">
-            <span class="ctrl-label" style="color: #2b6cb0;">Isócronas:</span>
+            <span class="ctrl-label" style="color: #2b6cb0;"data-i18n="ui.visual.isochrones">Isochrones:</span>
             <div class="ctrl-tools">
               <input type="range" id="opacIso" min="0" max="100" value="60" style="width: 50px;">
-              <label class="ctrl-chk s15-text"><input type="checkbox" id="contornoIso" style="margin-right:2px;"> Contorno</label>
+              <label class="ctrl-chk s15-text"><input type="checkbox" id="contornoIso" style="margin-right:2px;"><span data-i18n="ui.visual.outline">Outline</span></label>
             </div>
           </div>
           
           <div class="ctrl-group" style="margin-bottom:0;">
-            <span class="ctrl-label" style="color: #c53030;">Hexágonos:</span>
+            <span class="ctrl-label" style="color: #c53030;"data-i18n="ui.visual.hexagons">Hexagons:</span>
             <div class="ctrl-tools">
               <input type="range" id="opacHex" min="0" max="100" value="60" style="width: 50px;">
-              <label class="ctrl-chk s15-text"><input type="checkbox" id="contornoHex" style="margin-right:2px;"> Contorno 3D</label>
+              <label class="ctrl-chk s15-text"><input type="checkbox" id="contornoHex" style="margin-right:2px;"><span data-i18n="ui.visual.outline3d">3D outline</span></label>
             </div>
           </div>
           
@@ -408,18 +949,18 @@ const painelHtml = `
       </div>
 
       <div>
-        <label class="s15-label" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 8px;">8. Camadas de Vetores (Simulações)</label>
+        <label class="s15-label" data-i18n="ui.section.vectorLayers" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 8px;">8. Vector layers (simulations)</label>
         <div id="listaCamadasInput" style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px;"></div>
         <div id="listaCamadas" style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; max-height: 250px; overflow-y: auto; padding-right: 5px;"></div>
       </div>
       
       <div style="margin-top: 16px;">
-        <label class="s15-label" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 8px;">9. Camadas de Rasters (Ambiente)</label>
+        <label class="s15-label" data-i18n="ui.section.rasterLayers" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 8px;">9. Raster layers (environment)</label>
         <div id="listaCamadasRasters" style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px;"></div>
       </div>
 
       <button id="btnExportResult" class="smart15-btn-export">
-        <strong style="color:inherit;"><svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-download"/></svg> FAZER DOWNLOAD DO .ZIP</strong>
+        <strong style="color:inherit;"><svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-download"/></svg> <span data-i18n="ui.downloadZip">Download results (.ZIP)</span></strong>
       </button>
 
       <button
@@ -447,12 +988,33 @@ const painelHtml = `
             <use href="#icon-book"/>
           </svg>
 
-          GERAR RELATÓRIO TÉCNICO
+          <span data-i18n="report.generate">
+            Generate technical report
+          </span>
         </strong>
       </button>
 
-      <button id="btnScreenshot" class="smart15-btn-export" style="background: #ebf8ff; border-color: #63b3ed; color: #2b6cb0;">
-        <strong style="color:inherit;"><svg viewBox="0 0 24 24" class="s15-icon s15-icon-btn"><use href="#icon-camera"/></svg> CAPTURAR MAPA (SCREENSHOT)</strong>
+      <button
+        id="btnScreenshot"
+        class="smart15-btn-export"
+        style="
+          background: #ebf8ff;
+          border-color: #63b3ed;
+          color: #2b6cb0;
+        "
+      >
+        <strong style="color:inherit;">
+          <svg
+            viewBox="0 0 24 24"
+            class="s15-icon s15-icon-btn"
+          >
+            <use href="#icon-camera"/>
+          </svg>
+
+          <span data-i18n="ui.captureMap">
+            Capture map (screenshot)
+          </span>
+        </strong>
       </button>
 
     </div>
@@ -496,6 +1058,7 @@ const IDENTIFIABLE_LAYER_TYPES = new Set([
   "fill-extrusion",
   "heatmap",
 ]);
+
 
 function escapeHtml(value: unknown): string {
   return String(value ?? "")
@@ -553,6 +1116,75 @@ function getFeatureTitle(feature: any): string {
       ?? feature?.source
       ?? "Feição identificada",
   );
+}
+
+function getSimulationTypeLabel(
+  tipo: string,
+): string {
+  switch (tipo) {
+    case "isocronas":
+      return t("layer.isochrones");
+
+    case "hexagonos":
+      return t("layer.hexagons");
+
+    default:
+      return tipo;
+  }
+}
+
+function getProfileLabel(
+  perfil: string,
+): string {
+  const normalized =
+    perfil
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_");
+
+  const profileKeys: Record<
+    string,
+    TranslationKey
+  > = {
+    adulto_pedestre:
+      "profile.adulto_pedestre",
+
+    pedestre_crianca:
+      "profile.pedestre_crianca",
+
+    crianca_pedestre:
+      "profile.pedestre_crianca",
+
+    pedestre_idoso:
+      "profile.pedestre_idoso",
+
+    idoso_pedestre:
+      "profile.pedestre_idoso",
+
+    adulto_bike:
+      "profile.adulto_bike",
+
+    adulto_bicicleta:
+      "profile.adulto_bike",
+
+    ciclista_crianca:
+      "profile.ciclista_crianca",
+
+    crianca_bike:
+      "profile.ciclista_crianca",
+
+    ciclista_idoso:
+      "profile.ciclista_idoso",
+
+    idoso_bike:
+      "profile.ciclista_idoso",
+  };
+
+  const key = profileKeys[normalized];
+
+  return key
+    ? t(key)
+    : perfil;
 }
 
 function isIdentifiableFeature(feature: any): boolean {
@@ -734,17 +1366,85 @@ let ultimaConfiguracaoSimulacao: any = null;
 let ultimaCapturaMapa: string | null = null;
 let cleanupIdentifyHandlers: (() => void) | null = null;
 
+
+const RASTER_LABEL_KEYS: Record<
+  string,
+  TranslationKey
+> = {
+  "LST (Calor)":
+    "raster.lst",
+
+  "DEM (Relevo)":
+    "raster.dem",
+
+  "Declividade (%)":
+    "raster.slope",
+
+  "Ortofoto":
+    "raster.orthophoto",
+
+  "Índice NGRDI":
+    "raster.ngrdi",
+
+  "Classificação IA (OBIA)":
+    "raster.aiClassification",
+};
+
+
+function getRasterLabel(
+  rasterName: string,
+): string {
+  const key =
+    RASTER_LABEL_KEYS[rasterName];
+
+  if (!key) {
+    return rasterName;
+  }
+
+  return t(key);
+}
+
 const POI_LEGEND: Record<
   string,
-  { label: string; color: string }
+  {
+    labelKey: TranslationKey;
+    color: string;
+  }
 > = {
-  escolas: { label: "Escolas e creches", color: "#e53e3e" },
-  hospitais: { label: "Hospitais e clínicas", color: "#3182ce" },
-  parques: { label: "Parques e áreas verdes", color: "#38a169" },
-  mercados: { label: "Mercados e padarias", color: "#d69e2e" },
-  cultura: { label: "Equipamentos culturais", color: "#805ad5" },
-  comercio: { label: "Comércio e serviços", color: "#00b5d8" },
-  academias: { label: "Academias e esportes", color: "#dd6b20" },
+  escolas: {
+    labelKey: "target.escolas",
+    color: "#e53e3e",
+  },
+
+  hospitais: {
+    labelKey: "target.hospitais",
+    color: "#3182ce",
+  },
+
+  parques: {
+    labelKey: "target.parques",
+    color: "#38a169",
+  },
+
+  mercados: {
+    labelKey: "target.mercados",
+    color: "#d69e2e",
+  },
+
+  cultura: {
+    labelKey: "target.cultura",
+    color: "#805ad5",
+  },
+
+  comercio: {
+    labelKey: "target.comercio",
+    color: "#00b5d8",
+  },
+
+  academias: {
+    labelKey: "target.academias",
+    color: "#dd6b20",
+  },
 };
 
 function getPoiCategoriesFromSimulation(simulation: any): string[] {
@@ -778,32 +1478,80 @@ function buildReportMapLegend(
   selectedTargets: string[] = [],
   studyAreaColor = "#3182ce",
 ) {
+  const locale = getLocale();
+
   const timeBands = [
-    { label: "Até 2 min", color: "#4ade80" },
-    { label: "Até 5 min", color: "#a3e635" },
-    { label: "Até 10 min", color: "#facc15" },
-    { label: "Até 15 min", color: "#fb923c" },
-    { label: "Mais de 15 min", color: "#ef4444" },
+    {
+      label: t(
+        "map.legend.upToMinutes",
+        { value: 2 },
+        locale,
+      ),
+      color: "#4ade80",
+    },
+    {
+      label: t(
+        "map.legend.upToMinutes",
+        { value: 5 },
+        locale,
+      ),
+      color: "#a3e635",
+    },
+    {
+      label: t(
+        "map.legend.upToMinutes",
+        { value: 10 },
+        locale,
+      ),
+      color: "#facc15",
+    },
+    {
+      label: t(
+        "map.legend.upToMinutes",
+        { value: 15 },
+        locale,
+      ),
+      color: "#fb923c",
+    },
+    {
+      label: t(
+        "map.legend.overMinutes",
+        { value: 15 },
+        locale,
+      ),
+      color: "#ef4444",
+    },
   ];
 
   const selectedPois = selectedTargets
     .map((target) => POI_LEGEND[target])
     .filter(Boolean)
     .map((poi) => ({
-      ...poi,
+      label: t(
+        poi.labelKey,
+        {},
+        locale,
+      ),
+      color: poi.color,
       kind: "point" as const,
     }));
 
   return [
     {
-      label: "Área de estudo",
+      label: t(
+        "map.legend.studyArea",
+        {},
+        locale,
+      ),
       color: studyAreaColor,
       kind: "line" as const,
     },
+
     ...timeBands.map((band) => ({
       ...band,
       kind: "fill" as const,
     })),
+
     ...selectedPois,
   ];
 }
@@ -860,6 +1608,31 @@ export const plugin = {
 					const wrap = document.createElement("div");
 					wrap.innerHTML = painelHtml;
 					container.appendChild(wrap);
+
+          const languageSelect =
+            wrap.querySelector<HTMLSelectElement>(
+              "#smart15Language",
+            );
+
+          if (languageSelect) {
+            languageSelect.value = getLocale();
+
+            languageSelect.addEventListener(
+              "change",
+              () => {
+                setLocale(
+                  languageSelect.value as SupportedLocale,
+                );
+              },
+            );
+
+            translateDocument(wrap);
+
+            subscribeLocale((locale) => {
+              languageSelect.value = locale;
+              translateDocument(wrap);
+            });
+          }
 
                     const mapObj = getMapInstance(app);
                    
@@ -1636,7 +2409,7 @@ export const plugin = {
                                 }
                             });
                             layersAtivos.push(SAMPLE_FILL_LAYER_ID);
-                            appendLayerToggle(SAMPLE_FILL_LAYER_ID, "Amostras IA", listaCamadasInput);
+                            appendLayerToggle(SAMPLE_FILL_LAYER_ID, t("layer.aiSamples"), listaCamadasInput);
                         }
 
                         if (!currentMap.getLayer(SAMPLE_LINE_LAYER_ID)) {
@@ -1747,7 +2520,7 @@ export const plugin = {
                                     layersAtivos.push(sourceId + "-line");
                                 }
                                 painelPosProcessamento.style.display = "block";
-                                appendLayerToggle(sourceId + "-fill", "Área Geográfica (Base)", listaCamadasInput);
+                                appendLayerToggle(sourceId + "-fill", t("layer.studyArea"), listaCamadasInput);
                                 updateLayerStyle();
                             }
                         };
@@ -1922,7 +2695,7 @@ export const plugin = {
                                             if (!mapObj.getSource(sourceId)) { mapObj.addSource(sourceId, { type: 'geojson', data: geometriaGeoJSON }); } else { mapObj.getSource(sourceId).setData(geometriaGeoJSON); }
                                             if (!mapObj.getLayer(sourceId+'-fill')) { mapObj.addLayer({ id: sourceId+'-fill', type: 'fill', source: sourceId, paint: { 'fill-color': corArea.value, 'fill-opacity': 0.1 } }); layersAtivos.push(sourceId+'-fill'); }
                                             if (!mapObj.getLayer(sourceId+'-line')) { mapObj.addLayer({ id: sourceId+'-line', type: 'line', source: sourceId, paint: { 'line-color': corArea.value, 'line-width': 2, 'line-opacity': 0 } }); layersAtivos.push(sourceId+'-line'); }
-                                            mapObj.fitBounds(b, { padding: 40 }); painelPosProcessamento.style.display = "block"; appendLayerToggle(sourceId+'-fill', "Área Geográfica (Base)", listaCamadasInput); updateLayerStyle();
+                                            mapObj.fitBounds(b, { padding: 40 }); painelPosProcessamento.style.display = "block"; appendLayerToggle(sourceId+'-fill', t("layer.studyArea"), listaCamadasInput); updateLayerStyle();
                                         }
                                     } else { areaStatus.innerHTML = SVG_ICONS.WARN + " Falha BBox."; }
                                 } catch(err) { areaStatus.innerHTML = SVG_ICONS.WARN + " Erro GeoJSON"; }
@@ -1981,6 +2754,27 @@ export const plugin = {
                                             .replace(/\p{Diacritic}/gu, "")
                                             .toLowerCase();
 
+                                        const SAMPLE_CLASS_ALIASES: Record<string, number> = {
+                                          asfalto: 1,
+                                          via: 1,
+
+                                          calcada: 2,
+                                          passeio: 2,
+
+                                          construcao: 3,
+                                          telhado: 3,
+
+                                          arvore: 4,
+
+                                          grama: 5,
+                                          graminea: 5,
+                                          rasteira: 5,
+
+                                          solo: 6,
+                                          terra: 6,
+                                          terraexposta: 6,
+                                        };
+
                                         const numericClass = Number(rawClass);
 
                                         const classEntry = Object.entries(SAMPLE_CLASSES)
@@ -1988,10 +2782,12 @@ export const plugin = {
                                             normalizeClassName(className)
                                             === normalizeClassName(rawClass),
                                         );
+                                        const normalizedClass = normalizeClassName(rawClass);
 
                                         const classe = Number.isInteger(numericClass)
-                                        ? numericClass
-                                        : Number(classEntry?.[0]);
+                                          ? numericClass
+                                          : SAMPLE_CLASS_ALIASES[normalizedClass]
+                                            ?? Number(classEntry?.[0]);
 
                                         if (
                                         !Number.isInteger(classe)
@@ -2139,8 +2935,12 @@ export const plugin = {
                             getMapInstance(app),
                             {
                               legend: {
-                                title: "Legenda",
-                                items: buildReportMapLegend(
+                                title: t(
+                                  "map.legend",
+                                  {},
+                                  getLocale(),
+                                ),
+                              items: buildReportMapLegend(
                                   poiCategories,
                                   corArea.value,
                                 ),
@@ -2164,6 +2964,7 @@ export const plugin = {
                               mapImage: ultimaCapturaMapa,
                               studyGeometry:
                                 geometriaGeoJSON,
+                              locale: getLocale(),
                             });
 
                             console.group(
@@ -2222,21 +3023,106 @@ export const plugin = {
                       },
                     );
 
-                    (wrap.querySelector("#btnSimular") as HTMLButtonElement).addEventListener("click", async () => {
-                        if (!geometriaGeoJSON) { alert("Defina a Área de Estudo primeiro."); return; }
-                        const btnSimular = wrap.querySelector("#btnSimular") as HTMLButtonElement; btnSimular.innerText = "PROCESSANDO..."; btnSimular.disabled = true;
+                    (wrap.querySelector("#btnSimular") as HTMLButtonElement)
+                      .addEventListener("click", async () => {
+                        if (!geometriaGeoJSON) {
+                          alert(
+                            t("simulation.areaRequired"),
+                          );
+                          return;
+                        }
 
-                        const progressContainer = wrap.querySelector("#progressContainer") as HTMLDivElement; 
-                        const progressBar = wrap.querySelector("#progressBar") as HTMLDivElement; 
-                        const progressText = wrap.querySelector("#progressText") as HTMLSpanElement; 
-                        const progressLabel = wrap.querySelector("#progressLabel") as HTMLSpanElement;
+                        const btnSimular =
+                          wrap.querySelector(
+                            "#btnSimular",
+                          ) as HTMLButtonElement;
+
+                        const progressContainer =
+                          wrap.querySelector(
+                            "#progressContainer",
+                          ) as HTMLDivElement;
+
+                        const progressBar =
+                          wrap.querySelector(
+                            "#progressBar",
+                          ) as HTMLDivElement;
+
+                        const progressText =
+                          wrap.querySelector(
+                            "#progressText",
+                          ) as HTMLSpanElement;
+
+                        const progressLabel =
+                          wrap.querySelector(
+                            "#progressLabel",
+                          ) as HTMLSpanElement;
+
+                        btnSimular.innerText =
+                          t("simulation.processing");
+
+                        btnSimular.disabled = true;
+
+                        progressContainer.style.display =
+                          "block";
+
+                        progressBar.style.width = "0%";
+                        progressText.innerText = "0%";
+
+                        progressLabel.innerHTML =
+                          SVG_ICONS.SERVER
+                          + " "
+                          + t("simulation.startingMetric");
+
+                        btnSimular.disabled = true;
+                        progressContainer.style.display = "block";
+                        progressBar.style.width = "0%";
+                        progressText.innerText = "0%";
+
+                        progressLabel.innerHTML =
+                          SVG_ICONS.SERVER
+                          + " "
+                          + t("simulation.startingMetric");
                         
-                        progressContainer.style.display = "block"; progressBar.style.width = "0%"; progressText.innerText = "0%"; progressLabel.innerHTML = SVG_ICONS.SERVER + " Iniciando Cálculo Métrico...";
+                        progressContainer.style.display = "block"; progressBar.style.width = "0%"; progressText.innerText = "0%"; progressLabel.innerHTML = SVG_ICONS.SERVER + t("simulation.startingMetric");
 
                         let progressValue = 0; let pPhase = 1;
                         (window as any).simProgressInterval = setInterval(() => {
-                            if (pPhase === 1) { progressValue += Math.floor(Math.random()*8)+2; if(progressValue>=20){progressValue=20; pPhase=2; progressLabel.innerHTML=SVG_ICONS.SERVER+' Calculando Rasters e Metros...';} }
-                            else if (pPhase === 2) { progressValue += Math.floor(Math.random()*3)+1; if(progressValue>=85){progressValue=85; progressLabel.innerHTML=SVG_ICONS.SERVER+' Aguardando Servidor...';} else {progressLabel.innerHTML=SVG_ICONS.SERVER+' Roteando Metros ('+progressValue+'%)...';} }
+                          if (pPhase === 1) {
+                            progressValue +=
+                              Math.floor(Math.random() * 8) + 2;
+
+                            if (progressValue >= 20) {
+                              progressValue = 20;
+                              pPhase = 2;
+
+                              progressLabel.innerHTML =
+                                SVG_ICONS.SERVER
+                                + " "
+                                + t("simulation.calculatingRasters");
+                            }
+                          }
+
+                          else if (pPhase === 2) {
+                            progressValue +=
+                              Math.floor(Math.random() * 3) + 1;
+
+                            if (progressValue >= 85) {
+                              progressValue = 85;
+
+                              progressLabel.innerHTML =
+                                SVG_ICONS.SERVER
+                                + " "
+                                + t("simulation.waitingServer");
+                            } else {
+                              progressLabel.innerHTML =
+                                SVG_ICONS.SERVER
+                                + " "
+                                + t(
+                                    "simulation.routing",
+                                    { value: progressValue },
+                                  );
+                            }
+                          }
                             progressBar.style.width = progressValue+"%"; progressText.innerText = progressValue+"%";
                         }, 600);
 
@@ -2338,7 +3224,18 @@ export const plugin = {
                             btnGenerateReport.disabled =
                               !res.data.report;
                             //let ultimoResultadoSimulacao: any = null;
-                            clearInterval((window as any).simProgressInterval); progressValue=90; progressBar.style.width="90%"; progressText.innerText="90%"; progressLabel.innerHTML = SVG_ICONS.SUCCESS + " Desenhando na Tela...";
+                            clearInterval(
+                              (window as any).simProgressInterval,
+                            );
+
+                            progressValue = 90;
+                            progressBar.style.width = "90%";
+                            progressText.innerText = "90%";
+
+                            progressLabel.innerHTML =
+                              SVG_ICONS.SUCCESS
+                              + " "
+                              + t("simulation.drawing");
 
                             if (res.data) {
                                 downloadUrlZip = res.data.download_url; maskDataGeoJSON = res.data.mask_geojson;
@@ -2359,23 +3256,42 @@ export const plugin = {
                                 let osmPoiLayerId: string | null = null;
                                 if(res.data.rasters_vis) {
                                     Object.keys(res.data.rasters_vis).forEach(rName => {
-                                        const rData = res.data.rasters_vis[rName]; const rId = 'smart15-raster-' + rName.replace(/\\s/g,'') + '-' + Date.now();
+
+                                        const rasterLabel =getRasterLabel(rName);
+                                        const rData = res.data.rasters_vis[rName]; 
+                                        const rId = 'smart15-raster-' + rName.replace(/\\s/g,'') + '-' + Date.now();
                                         mapObj.addSource(rId, { type: 'image', url: rData.url + '?t=' + Date.now(), coordinates: rData.coordinates });
-                                        mapObj.addLayer({ id: rId+'-layer', type: 'raster', source: rId, paint: { 'raster-opacity': 0.6 } }); layersAtivos.push(rId+'-layer'); appendLayerToggle(rId+'-layer', rName, listaCamadasRasters);
+                                        mapObj.addLayer({ id: rId+'-layer', type: 'raster', source: rId, paint: { 'raster-opacity': 0.6 } }); layersAtivos.push(rId+'-layer'); appendLayerToggle(rId+'-layer', getRasterLabel(rName), listaCamadasRasters);
                                         
                                         if(rData.cmap_css) {
                                             rasterLegends.style.display = "block";
-                                            rasterLegends.innerHTML += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                                                <span style="width:30%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${rName}">${rName.split(' ')[0]}:</span> 
-                                                <span style="font-weight:bold;">${rData.min.toFixed(1)}</span>
-                                                <div style="flex:1; height:8px; margin:0 6px; border-radius:4px; background:${rData.cmap_css}"></div>
-                                                <span style="font-weight:bold;">${rData.max.toFixed(1)}</span>
-                                            </div>`;
+                                            rasterLegends.innerHTML += `
+                                              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                                                <span
+                                                  style="width:30%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+                                                  title="${rasterLabel}"
+                                                >
+                                                  ${rasterLabel}:
+                                                </span>
+
+                                                <span style="font-weight:bold;">
+                                                  ${rData.min.toFixed(1)}
+                                                </span>
+
+                                                <div
+                                                  style="flex:1; height:8px; margin:0 6px; border-radius:4px; background:${rData.cmap_css}"
+                                                ></div>
+
+                                                <span style="font-weight:bold;">
+                                                  ${rData.max.toFixed(1)}
+                                                </span>
+                                              </div>
+                                            `;
                                         }
                                         
                                         if (rData.legend) {
                                             rasterLegends.style.display = "block";
-                                            let htmlIA = `<b style="display: block; margin-top: 8px; margin-bottom: 6px; padding-top:4px; border-top:1px dashed #cbd5e0;">Legenda da IA (OBIA):</b><div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">`;
+                                            let htmlIA = `<b style="display: block; margin-top: 8px; margin-bottom: 6px; padding-top:4px; border-top:1px dashed #cbd5e0;">${t("raster.aiLegend")}</b><div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">`;
                                             for (let c in rData.legend) {
                                                 htmlIA += `<span style="display:flex; align-items:center;"><span class="legenda-box" style="background:${rData.legend[c]};"></span> ${c.toUpperCase()}</span>`;
                                             }
@@ -2447,17 +3363,49 @@ export const plugin = {
                                         mapObj.addLayer({ 'id': idOk+'-layer-stroke', 'type': 'line', 'source': idOk, 'paint': { 'line-color': stepColor, 'line-width': 2, 'line-opacity':0 } }); 
                                         layersAtivos.push(idOk+'-layer-stroke'); 
                                         
-                                        appendLayerToggle(idOk+'-layer', tipo + ' - ' + perfil, listaCamadas);
+                                        appendLayerToggle(idOk+'-layer', `${getSimulationTypeLabel(tipo)} - ${getProfileLabel(perfil)}`, listaCamadas);
                                     });
                                 }
                                 if (osmPoiLayerId && mapObj.getLayer(osmPoiLayerId)) {
                                   mapObj.moveLayer(osmPoiLayerId);
                                 }
 
-                                setTimeout(() => { updateLayerStyle(); progressBar.style.width="100%"; progressText.innerText="100%"; progressLabel.innerHTML=SVG_ICONS.SUCCESS+" Concluído!"; setTimeout(()=>progressContainer.style.display="none", 2000); }, 300);
+                                setTimeout(() => {
+                                  updateLayerStyle();
+
+                                  progressBar.style.width = "100%";
+                                  progressText.innerText = "100%";
+
+                                  progressLabel.innerHTML =
+                                    SVG_ICONS.SUCCESS
+                                    + " "
+                                    + t("simulation.completed");
+
+                                  setTimeout(
+                                    () => {
+                                      progressContainer.style.display =
+                                        "none";
+                                    },
+                                    2000,
+                                  );
+                                }, 300);
                             }
-                        } catch (erro) { clearInterval((window as any).simProgressInterval); progressLabel.innerHTML=SVG_ICONS.WARN+" Falha no Servidor."; } 
-                        finally { btnSimular.innerText = "Executar Simulação Urbana"; btnSimular.disabled = false; }
+                        } catch (erro) {
+                          clearInterval(
+                            (window as any).simProgressInterval,
+                          );
+
+                          progressLabel.innerHTML =
+                            SVG_ICONS.WARN
+                            + " "
+                            + t("simulation.serverFailed");
+                        }
+                        finally {
+                          btnSimular.innerText =
+                            t("simulation.run");
+
+                          btnSimular.disabled = false;
+                        }
                     });
 
                     return () => {

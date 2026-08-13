@@ -4,39 +4,82 @@ import {
   RouteIndicators,
 } from "./report.types";
 
+import {
+  DEFAULT_LOCALE,
+  t,
+} from "../i18n/i18n";
+
+import type {
+  SupportedLocale,
+} from "../i18n/i18n.types";
+
+import {
+  formatNumber,
+} from "./report.utils";
+
 export type ExecutiveSummary = {
-  status: "adequado" | "atenção" | "crítico";
-  priority: "baixa" | "média" | "alta";
+  status: string;
+  priority: string;
   headline: string;
   detail: string;
   restrictiveFactors: string[];
   recommendedAction: string;
 };
 
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
+function getReportLocale(
+  reportData: ReportData,
+): SupportedLocale {
+  return reportData.locale ?? DEFAULT_LOCALE;
+}
+
+function isFiniteNumber(
+  value: unknown,
+): value is number {
+  return (
+    typeof value === "number"
+    && Number.isFinite(value)
+  );
 }
 
 function analyzeSlope(
   indicators: RouteIndicators,
+  locale: SupportedLocale,
 ): FactorImpact | null {
-  const average = indicators.slope?.averagePercent;
-  const maximum = indicators.slope?.maximumPercent;
+  const average =
+    indicators.slope?.averagePercent;
 
-  if (!isFiniteNumber(average) || !isFiniteNumber(maximum)) {
+  const maximum =
+    indicators.slope?.maximumPercent;
+
+  if (
+    !isFiniteNumber(average)
+    || !isFiniteNumber(maximum)
+  ) {
     return null;
   }
 
   if (average < 3) {
     return {
       factor: "slope",
-      label: "Declividade",
+      label: t(
+        "factor.slope",
+        {},
+        locale,
+      ),
       rawValue: average,
       unit: "%",
       level: "low",
-      description:
-        `A declividade média do percurso foi de ${average.toFixed(1)}%, `
-        + "indicando baixa influência sobre o esforço e o tempo de caminhada.",
+      description: t(
+        "factor.slope.description.low",
+        {
+          average: formatNumber(
+            average,
+            1,
+            locale,
+          ),
+        },
+        locale,
+      ),
       recommendations: [],
     };
   }
@@ -44,46 +87,110 @@ function analyzeSlope(
   if (average < 8) {
     return {
       factor: "slope",
-      label: "Declividade",
+      label: t(
+        "factor.slope",
+        {},
+        locale,
+      ),
       rawValue: average,
       unit: "%",
       level: "moderate",
-      description:
-        `A declividade média foi de ${average.toFixed(1)}%, com valor máximo `
-        + `de ${maximum.toFixed(1)}%. O fator apresenta influência moderada `
-        + "sobre o esforço necessário e a velocidade de deslocamento.",
+      description: t(
+        "factor.slope.description.moderate",
+        {
+          average: formatNumber(
+            average,
+            1,
+            locale,
+          ),
+          maximum: formatNumber(
+            maximum,
+            1,
+            locale,
+          ),
+        },
+        locale,
+      ),
       recommendations: [
-        "Avaliar rotas alternativas com menor inclinação.",
-        "Verificar a continuidade e a regularidade das calçadas nos trechos inclinados.",
-        "Priorizar soluções de acessibilidade nos segmentos de maior declividade.",
+        t(
+          "factor.slope.recommendation.alternativeRoutes",
+          {},
+          locale,
+        ),
+        t(
+          "factor.slope.recommendation.sidewalkContinuity",
+          {},
+          locale,
+        ),
+        t(
+          "factor.slope.recommendation.accessibility",
+          {},
+          locale,
+        ),
       ],
     };
   }
 
   return {
     factor: "slope",
-    label: "Declividade",
+    label: t(
+      "factor.slope",
+      {},
+      locale,
+    ),
     rawValue: average,
     unit: "%",
-    level: average >= 12 ? "critical" : "high",
-    description:
-      `A declividade média foi de ${average.toFixed(1)}%, alcançando `
-      + `${maximum.toFixed(1)}% em determinados trechos. Esse fator representa `
-      + "uma limitação relevante à caminhabilidade, especialmente para pessoas "
-      + "idosas, crianças e pessoas com mobilidade reduzida.",
+    level:
+      average >= 12
+        ? "critical"
+        : "high",
+    description: t(
+      "factor.slope.description.high",
+      {
+        average: formatNumber(
+          average,
+          1,
+          locale,
+        ),
+        maximum: formatNumber(
+          maximum,
+          1,
+          locale,
+        ),
+      },
+      locale,
+    ),
     recommendations: [
-      "Priorizar rotas acessíveis com menor inclinação.",
-      "Implantar áreas de descanso nos trechos de maior esforço.",
-      "Avaliar rampas, corrimãos e adequações de acessibilidade.",
-      "Sinalizar trajetos alternativos com menor declividade.",
+      t(
+        "factor.slope.recommendation.accessibleRoutes",
+        {},
+        locale,
+      ),
+      t(
+        "factor.slope.recommendation.restAreas",
+        {},
+        locale,
+      ),
+      t(
+        "factor.slope.recommendation.ramps",
+        {},
+        locale,
+      ),
+      t(
+        "factor.slope.recommendation.signage",
+        {},
+        locale,
+      ),
     ],
   };
 }
 
 function analyzeTreeCoverage(
   indicators: RouteIndicators,
+  locale: SupportedLocale,
 ): FactorImpact | null {
-  const coverage = indicators.treeCoverage?.averagePercent;
+  const coverage =
+    indicators.treeCoverage?.averagePercent;
 
   if (!isFiniteNumber(coverage)) {
     return null;
@@ -92,17 +199,36 @@ function analyzeTreeCoverage(
   if (coverage >= 70) {
     return {
       factor: "treeCoverage",
-      label: "Cobertura arbórea estimada",
+      label: t(
+        "factor.treeCoverage",
+        {},
+        locale,
+      ),
       rawValue: coverage,
       unit: "%",
       level: "positive",
-      description:
-        `A cobertura arbórea estimada foi de ${coverage.toFixed(1)}%, `
-        + "representando condição favorável ao conforto térmico e à experiência "
-        + "do deslocamento a pé.",
+      description: t(
+        "factor.treeCoverage.description.positive",
+        {
+          coverage: formatNumber(
+            coverage,
+            1,
+            locale,
+          ),
+        },
+        locale,
+      ),
       recommendations: [
-        "Preservar a cobertura arbórea existente.",
-        "Manter ações periódicas de manejo e conservação.",
+        t(
+          "factor.treeCoverage.recommendation.preserve",
+          {},
+          locale,
+        ),
+        t(
+          "factor.treeCoverage.recommendation.maintenance",
+          {},
+          locale,
+        ),
       ],
     };
   }
@@ -110,66 +236,142 @@ function analyzeTreeCoverage(
   if (coverage >= 40) {
     return {
       factor: "treeCoverage",
-      label: "Cobertura arbórea estimada",
+      label: t(
+        "factor.treeCoverage",
+        {},
+        locale,
+      ),
       rawValue: coverage,
       unit: "%",
       level: "moderate",
-      description:
-        `A cobertura arbórea estimada foi de ${coverage.toFixed(1)}%. `
-        + "A arborização oferece proteção parcial ao percurso, mas existem "
-        + "segmentos que podem apresentar menor conforto térmico.",
+      description: t(
+        "factor.treeCoverage.description.moderate",
+        {
+          coverage: formatNumber(
+            coverage,
+            1,
+            locale,
+          ),
+        },
+        locale,
+      ),
       recommendations: [
-        "Ampliar a arborização nos segmentos com menor cobertura.",
-        "Priorizar espécies adequadas às calçadas e à infraestrutura urbana.",
+        t(
+          "factor.treeCoverage.recommendation.expand",
+          {},
+          locale,
+        ),
+        t(
+          "factor.treeCoverage.recommendation.species",
+          {},
+          locale,
+        ),
       ],
     };
   }
 
   return {
     factor: "treeCoverage",
-    label: "Cobertura arbórea estimada",
+    label: t(
+      "factor.treeCoverage",
+      {},
+      locale,
+    ),
     rawValue: coverage,
     unit: "%",
-    level: coverage < 20 ? "critical" : "high",
-    description:
-      `A cobertura arbórea estimada foi de apenas ${coverage.toFixed(1)}%, `
-      + "conforme classificação automatizada da imagem utilizada na simulação."
-      + "A baixa disponibilidade de sombra pode reduzir o conforto do pedestre, "
-      + "principalmente em períodos de maior temperatura.",
+    level:
+      coverage < 20
+        ? "critical"
+        : "high",
+    description: t(
+      "factor.treeCoverage.description.high",
+      {
+        coverage: formatNumber(
+          coverage,
+          1,
+          locale,
+        ),
+      },
+      locale,
+    ),
     recommendations: [
-      "Implantar corredores verdes nos principais eixos de caminhada.",
-      "Priorizar o plantio de árvores em trechos com maior exposição solar.",
-      "Integrar arborização, calçadas e redes de infraestrutura no planejamento.",
+      t(
+        "factor.treeCoverage.recommendation.greenCorridors",
+        {},
+        locale,
+      ),
+      t(
+        "factor.treeCoverage.recommendation.planting",
+        {},
+        locale,
+      ),
+      t(
+        "factor.treeCoverage.recommendation.infrastructure",
+        {},
+        locale,
+      ),
     ],
   };
 }
 
 function analyzeTemperature(
   indicators: RouteIndicators,
+  locale: SupportedLocale,
 ): FactorImpact | null {
-  const average = indicators.temperature?.averageCelsius;
-  const maximum = indicators.temperature?.maximumCelsius;
+  const average =
+    indicators.temperature?.averageCelsius;
+
+  const maximum =
+    indicators.temperature?.maximumCelsius;
 
   if (!isFiniteNumber(average)) {
     return null;
   }
 
-  const maximumText = isFiniteNumber(maximum)
-    ? `, com máximo estimado de ${maximum.toFixed(1)} °C`
-    : "";
+  const maximumText =
+    isFiniteNumber(maximum)
+      ? t(
+          "factor.temperature.maximum",
+          {
+            maximum: formatNumber(
+              maximum,
+              1,
+              locale,
+            ),
+          },
+          locale,
+        )
+      : "";
 
   if (average < 28) {
     return {
       factor: "temperature",
-      label: "Temperatura de superfície",
+      label: t(
+        "factor.temperature",
+        {},
+        locale,
+      ),
       rawValue: average,
       unit: "°C",
       level: "positive",
-      description:
-        `A temperatura média estimada da superfície foi de ${average.toFixed(1)} °C${maximumText}, `
-        + "indicando condição favorável de exposição térmica para o deslocamento.",
+      description: t(
+        "factor.temperature.description.positive",
+        {
+          average: formatNumber(
+            average,
+            1,
+            locale,
+          ),
+          maximumText,
+        },
+        locale,
+      ),
       recommendations: [
-        "Preservar as condições de sombreamento e conforto térmico existentes.",
+        t(
+          "factor.temperature.recommendation.preserve",
+          {},
+          locale,
+        ),
       ],
     };
   }
@@ -177,150 +379,330 @@ function analyzeTemperature(
   if (average < 34) {
     return {
       factor: "temperature",
-      label: "Temperatura de superfície",
+      label: t(
+        "factor.temperature",
+        {},
+        locale,
+      ),
       rawValue: average,
       unit: "°C",
       level: "moderate",
-      description:
-        `A temperatura média estimada da superfície foi de ${average.toFixed(1)} °C${maximumText}. `
-        + "A exposição térmica merece atenção em trechos sem sombra, sobretudo nos horários mais quentes.",
+      description: t(
+        "factor.temperature.description.moderate",
+        {
+          average: formatNumber(
+            average,
+            1,
+            locale,
+          ),
+          maximumText,
+        },
+        locale,
+      ),
       recommendations: [
-        "Priorizar arborização e sombreamento nos trechos mais expostos.",
-        "Prever áreas de descanso em rotas de maior permanência a pé.",
+        t(
+          "factor.temperature.recommendation.shade",
+          {},
+          locale,
+        ),
+        t(
+          "factor.temperature.recommendation.restAreas",
+          {},
+          locale,
+        ),
       ],
     };
   }
 
   return {
     factor: "temperature",
-    label: "Temperatura de superfície",
+    label: t(
+      "factor.temperature",
+      {},
+      locale,
+    ),
     rawValue: average,
     unit: "°C",
-    level: average >= 38 ? "critical" : "high",
-    description:
-      `A temperatura média estimada da superfície foi de ${average.toFixed(1)} °C${maximumText}. `
-      + "O resultado indica exposição térmica elevada, que pode reduzir o conforto e a viabilidade do deslocamento a pé, especialmente para crianças, pessoas idosas e pessoas com mobilidade reduzida.",
+    level:
+      average >= 38
+        ? "critical"
+        : "high",
+    description: t(
+      "factor.temperature.description.high",
+      {
+        average: formatNumber(
+          average,
+          1,
+          locale,
+        ),
+        maximumText,
+      },
+      locale,
+    ),
     recommendations: [
-      "Implantar arborização e soluções de sombreamento nos trechos prioritários.",
-      "Integrar mobiliário urbano e áreas de descanso às rotas mais expostas.",
-      "Priorizar trajetos com maior conforto térmico na sinalização e no planejamento.",
+      t(
+        "factor.temperature.recommendation.priorityShade",
+        {},
+        locale,
+      ),
+      t(
+        "factor.temperature.recommendation.furniture",
+        {},
+        locale,
+      ),
+      t(
+        "factor.temperature.recommendation.coolerRoutes",
+        {},
+        locale,
+      ),
     ],
   };
 }
 
 function analyzePavement(
   indicators: RouteIndicators,
+  locale: SupportedLocale,
 ): FactorImpact | null {
-  const pavement = indicators.pavement;
+  const pavement =
+    indicators.pavement;
 
   if (!pavement) {
     return null;
   }
 
-  const adequate = pavement.adequatePercent;
+  const adequate =
+    pavement.adequatePercent;
 
   if (adequate >= 80) {
     return {
       factor: "pavement",
-      label: "Qualidade do pavimento",
+      label: t(
+        "factor.pavement",
+        {},
+        locale,
+      ),
       rawValue: adequate,
       unit: "%",
       level: "positive",
-      description:
-        `${adequate.toFixed(1)}% do percurso foi classificado como adequado. `
-        + "A condição do pavimento favorece a continuidade do deslocamento.",
-      recommendations: ["Manter ações preventivas de conservação das calçadas."],
+      description: t(
+        "factor.pavement.description.positive",
+        {
+          adequate: formatNumber(
+            adequate,
+            1,
+            locale,
+          ),
+        },
+        locale,
+      ),
+      recommendations: [
+        t(
+          "factor.pavement.recommendation.maintenance",
+          {},
+          locale,
+        ),
+      ],
     };
   }
 
   if (adequate >= 50) {
     return {
       factor: "pavement",
-      label: "Qualidade do pavimento",
+      label: t(
+        "factor.pavement",
+        {},
+        locale,
+      ),
       rawValue: adequate,
       unit: "%",
       level: "moderate",
-      description:
-        `${adequate.toFixed(1)}% do percurso apresenta pavimento adequado. `
-        + "Há limitações pontuais que podem afetar o conforto ou a acessibilidade.",
+      description: t(
+        "factor.pavement.description.moderate",
+        {
+          adequate: formatNumber(
+            adequate,
+            1,
+            locale,
+          ),
+        },
+        locale,
+      ),
       recommendations: [
-        "Mapear os segmentos descontínuos ou deteriorados.",
-        "Priorizar a recuperação de calçadas próximas aos destinos essenciais.",
+        t(
+          "factor.pavement.recommendation.mapSegments",
+          {},
+          locale,
+        ),
+        t(
+          "factor.pavement.recommendation.recovery",
+          {},
+          locale,
+        ),
       ],
     };
   }
 
   return {
     factor: "pavement",
-    label: "Qualidade do pavimento",
+    label: t(
+      "factor.pavement",
+      {},
+      locale,
+    ),
     rawValue: adequate,
     unit: "%",
     level: "high",
-    description:
-      `Somente ${adequate.toFixed(1)}% do percurso apresenta pavimento `
-      + "considerado adequado. A condição representa uma barreira importante "
-      + "ao deslocamento de pedestres.",
+    description: t(
+      "factor.pavement.description.high",
+      {
+        adequate: formatNumber(
+          adequate,
+          1,
+          locale,
+        ),
+      },
+      locale,
+    ),
     recommendations: [
-      "Recuperar os trechos de calçada em condições inadequadas.",
-      "Eliminar desníveis, obstáculos e descontinuidades.",
-      "Adotar padrões de acessibilidade nas intervenções.",
+      t(
+        "factor.pavement.recommendation.repair",
+        {},
+        locale,
+      ),
+      t(
+        "factor.pavement.recommendation.obstacles",
+        {},
+        locale,
+      ),
+      t(
+        "factor.pavement.recommendation.standards",
+        {},
+        locale,
+      ),
     ],
   };
 }
 
 function analyzeAccessibility(
   indicators: RouteIndicators,
+  locale: SupportedLocale,
 ): FactorImpact | null {
-  const accessibility = indicators.accessibility;
+  const accessibility =
+    indicators.accessibility;
 
   if (!accessibility) {
     return null;
   }
 
-  const accessible = accessibility.accessibleSegmentsPercent;
+  const accessible =
+    accessibility.accessibleSegmentsPercent;
 
   if (accessible >= 80) {
     return {
       factor: "accessibility",
-      label: "Acessibilidade",
+      label: t(
+        "factor.accessibility",
+        {},
+        locale,
+      ),
       rawValue: accessible,
       unit: "%",
       level: "positive",
-      description: `${accessible.toFixed(1)}% dos segmentos analisados foram classificados como acessíveis.`,
-      recommendations: ["Preservar a continuidade da rota acessível."],
+      description: t(
+        "factor.accessibility.description.positive",
+        {
+          accessible: formatNumber(
+            accessible,
+            1,
+            locale,
+          ),
+        },
+        locale,
+      ),
+      recommendations: [
+        t(
+          "factor.accessibility.recommendation.preserve",
+          {},
+          locale,
+        ),
+      ],
     };
   }
 
   if (accessible >= 50) {
     return {
       factor: "accessibility",
-      label: "Acessibilidade",
+      label: t(
+        "factor.accessibility",
+        {},
+        locale,
+      ),
       rawValue: accessible,
       unit: "%",
       level: "moderate",
-      description:
-        `${accessible.toFixed(1)}% dos segmentos foram classificados como acessíveis. `
-        + "A rota possui condições parciais de acessibilidade, com possíveis interrupções ao longo do percurso.",
+      description: t(
+        "factor.accessibility.description.moderate",
+        {
+          accessible: formatNumber(
+            accessible,
+            1,
+            locale,
+          ),
+        },
+        locale,
+      ),
       recommendations: [
-        "Identificar e corrigir os pontos de interrupção da rota acessível.",
-        "Priorizar conexões entre calçadas, rampas e travessias.",
+        t(
+          "factor.accessibility.recommendation.interruptions",
+          {},
+          locale,
+        ),
+        t(
+          "factor.accessibility.recommendation.connections",
+          {},
+          locale,
+        ),
       ],
     };
   }
 
   return {
     factor: "accessibility",
-    label: "Acessibilidade",
+    label: t(
+      "factor.accessibility",
+      {},
+      locale,
+    ),
     rawValue: accessible,
     unit: "%",
     level: "critical",
-    description:
-      `Apenas ${accessible.toFixed(1)}% dos segmentos foram classificados como acessíveis. `
-      + "O resultado indica baixa continuidade para pessoas com mobilidade reduzida.",
+    description: t(
+      "factor.accessibility.description.critical",
+      {
+        accessible: formatNumber(
+          accessible,
+          1,
+          locale,
+        ),
+      },
+      locale,
+    ),
     recommendations: [
-      "Elaborar plano prioritário de adequação das calçadas.",
-      "Implantar rampas e travessias acessíveis.",
-      "Remover obstáculos e corrigir desníveis.",
+      t(
+        "factor.accessibility.recommendation.plan",
+        {},
+        locale,
+      ),
+      t(
+        "factor.accessibility.recommendation.ramps",
+        {},
+        locale,
+      ),
+      t(
+        "factor.accessibility.recommendation.removeObstacles",
+        {},
+        locale,
+      ),
     ],
   };
 }
@@ -329,107 +711,307 @@ function getConfiguredWeight(
   reportData: ReportData,
   factor: FactorImpact["factor"],
 ): number | undefined {
-  const weights = reportData.configuration?.weights;
+  const weights =
+    reportData.configuration?.weights;
 
   if (!weights) {
     return undefined;
   }
 
-  const weight = weights[factor as keyof typeof weights];
-  return isFiniteNumber(weight) ? weight : undefined;
+  const weight =
+    weights[
+      factor as keyof typeof weights
+    ];
+
+  return isFiniteNumber(weight)
+    ? weight
+    : undefined;
 }
 
 function addCalculationContext(
   reportData: ReportData,
   factor: FactorImpact,
 ): FactorImpact {
-  const weight = getConfiguredWeight(reportData, factor.factor);
+  const weight =
+    getConfiguredWeight(
+      reportData,
+      factor.factor,
+    );
 
   if (weight !== 0) {
     return factor;
   }
 
+  const locale =
+    getReportLocale(reportData);
+
   return {
     ...factor,
-    description:
-      `${factor.description} Este fator foi identificado no diagnóstico, `
-      + "mas não recebeu ponderação no cálculo do tempo ajustado desta simulação.",
+    description: t(
+      "factor.calculation.noWeight",
+      {
+        description:
+          factor.description,
+      },
+      locale,
+    ),
   };
 }
 
-/** Analisa os fatores disponíveis e registra sua interpretação territorial. */
+/**
+ * Analisa os fatores disponíveis e registra
+ * sua interpretação territorial.
+ */
 export function analyzeFactors(
   reportData: ReportData,
 ): FactorImpact[] {
-  const { indicators } = reportData;
+  const {
+    indicators,
+  } = reportData;
+
+  const locale =
+    getReportLocale(reportData);
 
   return [
-    analyzeSlope(indicators),
-    analyzeTreeCoverage(indicators),
-    analyzeTemperature(indicators),
-    analyzePavement(indicators),
-    analyzeAccessibility(indicators),
+    analyzeSlope(
+      indicators,
+      locale,
+    ),
+    analyzeTreeCoverage(
+      indicators,
+      locale,
+    ),
+    analyzeTemperature(
+      indicators,
+      locale,
+    ),
+    analyzePavement(
+      indicators,
+      locale,
+    ),
+    analyzeAccessibility(
+      indicators,
+      locale,
+    ),
   ]
-    .filter((factor): factor is FactorImpact => factor !== null)
-    .map((factor) => addCalculationContext(reportData, factor));
+    .filter(
+      (
+        factor,
+      ): factor is FactorImpact =>
+        factor !== null,
+    )
+    .map(
+      (factor) =>
+        addCalculationContext(
+          reportData,
+          factor,
+        ),
+    );
 }
 
 /**
- * Constrói uma síntese determinística para a leitura gerencial do relatório.
- * Não substitui a análise técnica detalhada nem utiliza modelo de linguagem.
+ * Constrói uma síntese determinística
+ * para a leitura gerencial do relatório.
+ *
+ * Não substitui a análise técnica detalhada
+ * nem utiliza modelo de linguagem.
  */
 export function buildExecutiveSummary(
   reportData: ReportData,
-  factors: FactorImpact[] = analyzeFactors(reportData),
+  factors: FactorImpact[] =
+    analyzeFactors(reportData),
 ): ExecutiveSummary {
-  const adjustedTime = reportData.indicators.adjustedTimeMinutes;
-  const targetTime = reportData.configuration.targetTimeMinutes;
-  const hasTimeResult = isFiniteNumber(adjustedTime) && isFiniteNumber(targetTime);
-  const exceedsTarget = hasTimeResult && adjustedTime > targetTime;
-  const criticalFactors = factors.filter((factor) => factor.level === "critical");
-  const highFactors = factors.filter((factor) => factor.level === "high");
-  const restrictiveFactors = [...criticalFactors, ...highFactors]
-    .map((factor) => factor.label);
+  const locale =
+    getReportLocale(reportData);
 
-  if (exceedsTarget || criticalFactors.length > 0) {
-    const timeMessage = exceedsTarget
-      ? `O tempo ajustado de ${adjustedTime.toFixed(1)} min ultrapassa a meta de ${targetTime.toFixed(1)} min.`
-      : "Foram identificados fatores críticos de restrição no território analisado.";
+  const adjustedTime =
+    reportData
+      .indicators
+      .adjustedTimeMinutes;
+
+  const targetTime =
+    reportData
+      .configuration
+      .targetTimeMinutes;
+
+  const hasTimeResult =
+    isFiniteNumber(adjustedTime)
+    && isFiniteNumber(targetTime);
+
+  const exceedsTarget =
+    hasTimeResult
+    && adjustedTime > targetTime;
+
+  const criticalFactors =
+    factors.filter(
+      (factor) =>
+        factor.level === "critical",
+    );
+
+  const highFactors =
+    factors.filter(
+      (factor) =>
+        factor.level === "high",
+    );
+
+  const restrictiveFactors = [
+    ...criticalFactors,
+    ...highFactors,
+  ].map(
+    (factor) => factor.label,
+  );
+
+  if (
+    exceedsTarget
+    || criticalFactors.length > 0
+  ) {
+    const detail =
+      exceedsTarget
+        ? t(
+            "executive.critical.timeExceeded",
+            {
+              adjusted: formatNumber(
+                adjustedTime,
+                1,
+                locale,
+              ),
+              target: formatNumber(
+                targetTime,
+                1,
+                locale,
+              ),
+            },
+            locale,
+          )
+        : t(
+            "executive.critical.factors",
+            {},
+            locale,
+          );
 
     return {
-      status: "crítico",
-      priority: "alta",
-      headline: "Intervenção prioritária recomendada",
-      detail: timeMessage,
+      status: t(
+        "executive.status.critical",
+        {},
+        locale,
+      ),
+      priority: t(
+        "executive.priority.high",
+        {},
+        locale,
+      ),
+      headline: t(
+        "executive.critical.headline",
+        {},
+        locale,
+      ),
+      detail,
       restrictiveFactors,
-      recommendedAction:
-        "Priorizar intervenção nos trechos críticos e avaliar rotas alternativas acessíveis antes de novos investimentos de expansão.",
+      recommendedAction: t(
+        "executive.critical.action",
+        {},
+        locale,
+      ),
     };
   }
 
   if (highFactors.length > 0) {
     return {
-      status: "atenção",
-      priority: "média",
-      headline: "Acessibilidade dentro da meta, com restrições relevantes",
-      detail: hasTimeResult
-        ? `O tempo ajustado de ${adjustedTime.toFixed(1)} min atende à meta de ${targetTime.toFixed(1)} min, mas requer qualificação do percurso.`
-        : "A simulação não disponibilizou o tempo ajustado, mas identificou restrições relevantes no percurso.",
+      status: t(
+        "executive.status.attention",
+        {},
+        locale,
+      ),
+      priority: t(
+        "executive.priority.medium",
+        {},
+        locale,
+      ),
+      headline: t(
+        "executive.attention.headline",
+        {},
+        locale,
+      ),
+      detail:
+        hasTimeResult
+          ? t(
+              "executive.attention.withTime",
+              {
+                adjusted:
+                  formatNumber(
+                    adjustedTime,
+                    1,
+                    locale,
+                  ),
+                target:
+                  formatNumber(
+                    targetTime,
+                    1,
+                    locale,
+                  ),
+              },
+              locale,
+            )
+          : t(
+              "executive.attention.withoutTime",
+              {},
+              locale,
+            ),
       restrictiveFactors,
-      recommendedAction:
-        "Planejar intervenções graduais nos fatores restritivos e monitorar seus efeitos nas próximas simulações.",
+      recommendedAction: t(
+        "executive.attention.action",
+        {},
+        locale,
+      ),
     };
   }
 
   return {
-    status: "adequado",
-    priority: "baixa",
-    headline: "Condição geral favorável",
-    detail: hasTimeResult
-      ? `O tempo ajustado de ${adjustedTime.toFixed(1)} min atende à meta de ${targetTime.toFixed(1)} min sem fatores classificados como elevados ou críticos.`
-      : "Não foram identificados fatores classificados como elevados ou críticos com os dados disponíveis.",
+    status: t(
+      "executive.status.adequate",
+      {},
+      locale,
+    ),
+    priority: t(
+      "executive.priority.low",
+      {},
+      locale,
+    ),
+    headline: t(
+      "executive.adequate.headline",
+      {},
+      locale,
+    ),
+    detail:
+      hasTimeResult
+        ? t(
+            "executive.adequate.withTime",
+            {
+              adjusted:
+                formatNumber(
+                  adjustedTime,
+                  1,
+                  locale,
+                ),
+              target:
+                formatNumber(
+                  targetTime,
+                  1,
+                  locale,
+                ),
+            },
+            locale,
+          )
+        : t(
+            "executive.adequate.withoutTime",
+            {},
+            locale,
+          ),
     restrictiveFactors: [],
-    recommendedAction:
-      "Manter as condições existentes, monitorar a área e preservar os elementos favoráveis à acessibilidade.",
+    recommendedAction: t(
+      "executive.adequate.action",
+      {},
+      locale,
+    ),
   };
 }

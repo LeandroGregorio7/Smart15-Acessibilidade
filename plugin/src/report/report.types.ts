@@ -1,3 +1,7 @@
+import type {
+  SupportedLocale,
+} from "../i18n/i18n.types";
+
 export type InfluenceLevel =
   | "positive"
   | "neutral"
@@ -157,6 +161,8 @@ export interface MapImage {
 }
 
 export interface ReportData {
+  locale?: SupportedLocale;
+
   identification: ReportIdentification;
   configuration: SimulationConfiguration;
   indicators: RouteIndicators;
@@ -169,4 +175,22 @@ export interface ReportData {
 
   dataSources?: string[];
   notes?: string[];
+
+
+  area?: Record<string, unknown>;
+
+
+  profiles?: unknown[];
+
+
+  pois?: {
+    total?: number;
+    por_categoria?: Record<string, number>;
+    [key: string]: unknown;
+  };
+
+
+  studyGeometry?: unknown | null;
+
+  raw?: unknown;
 }

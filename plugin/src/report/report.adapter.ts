@@ -3,11 +3,29 @@ import {
   resolveAdministrativeLocation,
 } from "./report.geocoding";
 
+import {
+  DEFAULT_LOCALE,
+  t,
+} from "../i18n/i18n";
+
+import type {
+  SupportedLocale,
+} from "../i18n/i18n.types";
+
+import type {
+  TranslationKey,
+} from "../i18n/translations";
+
+import type {
+  ReportData,
+} from "./report.types";
+
 export interface SimulationReportAdapterInput {
   simulation: any;
   configuration?: any;
   mapImage?: string | null;
   studyGeometry?: any;
+  locale?: SupportedLocale;
 }
 
 function numberOrNull(value: unknown): number | null {
@@ -54,49 +72,105 @@ function stringArray(value: unknown): string[] {
     .filter(Boolean);
 }
 
-function destinationLabel(value: string): string {
-  const labels: Record<string, string> = {
-    escolas: "Escolas e creches",
-    hospitais: "Hospitais e clínicas",
-    parques: "Parques e áreas verdes",
-    mercados: "Mercados e padarias",
-    cultura: "Equipamentos culturais",
-    comercio: "Comércio e serviços",
-    academias: "Academias e equipamentos esportivos",
-    saude: "Unidades de saúde",
-    educacao: "Equipamentos de educação",
-    lazer: "Equipamentos de lazer",
-  };
+const DESTINATION_KEYS: Record<
+  string,
+  TranslationKey
+> = {
+  escolas: "target.escolas",
+  hospitais: "target.hospitais",
+  mercados: "target.mercados",
+  parques: "target.parques",
+  cultura: "target.cultura",
+  comercio: "target.comercio",
+  academias: "target.academias",
+};
 
-  return labels[value]
-    ?? value
-      .replace(/_/g, " ")
-      .replace(/\b\w/g, (letter) =>
-        letter.toUpperCase()
-      );
+function destinationLabel(
+  value: string,
+  locale: SupportedLocale,
+): string {
+  const key = DESTINATION_KEYS[value];
+
+  if (key) {
+    return t(
+      key,
+      {},
+      locale,
+    );
+  }
+
+  return value
+    .replace(/_/g, " ")
+    .replace(
+      /\b\w/g,
+      (letter) => letter.toUpperCase(),
+    );
 }
 
-function profileLabel(value: string): string {
-  const labels: Record<string, string> = {
-    adulto_pedestre: "Adulto — a pé",
-    crianca_pedestre: "Criança — a pé",
-    idoso_pedestre: "Pessoa idosa — a pé",
+const PROFILE_KEYS: Record<
+  string,
+  TranslationKey
+> = {
+  adulto_pedestre:
+    "profile.adulto_pedestre",
 
-    adulto_bike: "Adulto — bicicleta",
-    crianca_bike: "Criança — bicicleta",
-    idoso_bike: "Pessoa idosa — bicicleta",
+  pedestre_crianca:
+    "profile.pedestre_crianca",
 
-    adulto_bicicleta: "Adulto — bicicleta",
-    crianca_bicicleta: "Criança — bicicleta",
-    idoso_bicicleta: "Pessoa idosa — bicicleta",
-  };
+  crianca_pedestre:
+    "profile.pedestre_crianca",
 
-  return labels[value]
-    ?? value
-      .replace(/_/g, " ")
-      .replace(/\b\w/g, (letter) =>
-        letter.toUpperCase()
-      );
+  pedestre_idoso:
+    "profile.pedestre_idoso",
+
+  idoso_pedestre:
+    "profile.pedestre_idoso",
+
+  adulto_bike:
+    "profile.adulto_bike",
+
+  adulto_bicicleta:
+    "profile.adulto_bike",
+
+  ciclista_crianca:
+    "profile.ciclista_crianca",
+
+  crianca_bike:
+    "profile.ciclista_crianca",
+
+  crianca_bicicleta:
+    "profile.ciclista_crianca",
+
+  ciclista_idoso:
+    "profile.ciclista_idoso",
+
+  idoso_bike:
+    "profile.ciclista_idoso",
+
+  idoso_bicicleta:
+    "profile.ciclista_idoso",
+};
+
+function profileLabel(
+  value: string,
+  locale: SupportedLocale,
+): string {
+  const key = PROFILE_KEYS[value];
+
+  if (key) {
+    return t(
+      key,
+      {},
+      locale,
+    );
+  }
+
+  return value
+    .replace(/_/g, " ")
+    .replace(
+      /\b\w/g,
+      (letter) => letter.toUpperCase(),
+    );
 }
 
 function resolveTargetTimeMinutes(configuration: any): number {
@@ -111,7 +185,8 @@ function resolveTargetTimeMinutes(configuration: any): number {
 
 export async function adaptSimulationToReport(
   input: SimulationReportAdapterInput,
-): Promise<any> {
+): Promise<ReportData>{
+  const locale = input.locale ?? DEFAULT_LOCALE;
   const simulation = input.simulation ?? {};
   const backendReport = simulation.report ?? simulation ?? {};
   const rasters = backendReport.rasters ?? {};
@@ -128,7 +203,13 @@ export async function adaptSimulationToReport(
     );
 
     const selectedProfileLabels =
-      selectedProfiles.map(profileLabel);
+          selectedProfiles.map(
+            (profile) =>
+              profileLabel(
+                profile,
+                locale,
+              ),
+    );
 
     const selectedDestinations = stringArray(
       frontendConfiguration.selectedDestinations
@@ -226,8 +307,13 @@ export async function adaptSimulationToReport(
       : null;
 
   const destinationLabels =
-  selectedDestinations.map(destinationLabel);
-
+    selectedDestinations.map(
+      (destination) =>
+        destinationLabel(
+          destination,
+          locale,
+        ),
+    );
   const destinationsSummary =
     destinationLabels.length > 0
       ? destinationLabels.join(", ")
@@ -238,22 +324,32 @@ export async function adaptSimulationToReport(
       ? selectedDestinations.join(", ")
       : undefined;
 
-  const destinationName = firstNonEmptyString(
-    frontendConfiguration.destinationName,
-    frontendConfiguration.nomeDestino,
-    simulation.destinationName,
-    simulation.nome_destino,
-    destinationsSummary,
-    "Área de estudo",
-  )!;
+  const destinationName =
+    firstNonEmptyString(
+      frontendConfiguration.destinationName,
+      frontendConfiguration.nomeDestino,
+      simulation.destinationName,
+      simulation.nome_destino,
+      destinationsSummary,
+      t(
+        "adapter.studyArea",
+        {},
+        locale,
+      ),
+    )!;
 
-  const destinationType = firstNonEmptyString(
-    frontendConfiguration.destinationType,
-    frontendConfiguration.tipoDestino,
-    simulation.destinationType,
-    simulation.tipo_destino,
-    destinationTypesSummary,
-    "não informado",
+  const destinationType =
+    firstNonEmptyString(
+      frontendConfiguration.destinationType,
+      frontendConfiguration.tipoDestino,
+      simulation.destinationType,
+      simulation.tipo_destino,
+      destinationTypesSummary,
+      t(
+        "common.notProvided",
+        {},
+        locale,
+      ),
   )!;
 
   const areaSquareMeters = numberOrZero(
@@ -346,6 +442,7 @@ export async function adaptSimulationToReport(
 
 
   return {
+    locale,
     identification: {
       analysisId: String(
         simulation.simulation_id
@@ -359,7 +456,11 @@ export async function adaptSimulationToReport(
         frontendConfiguration.nomeArea,
         simulation.areaName,
         simulation.nome_area,
-        "Área selecionada no mapa",
+        t(
+          "adapter.selectedMapArea",
+          {},
+          locale,
+        ),
       ),
       destinationName,
       destinationType,
@@ -417,17 +518,18 @@ export async function adaptSimulationToReport(
           averagePercent: numberOrNull(
             vegetation.cobertura_arborea_percent
               ?? vegetation.percentual_cobertura_arborea
-              ?? vegetation.percentual_cobertura_arborea
               ?? vegetation.averagePercent,
           ),
-        },
 
-        grassCoveragePercent: numberOrNull(
-          vegetation.cobertura_gramada_percent,
-        ),
-        totalVegetatedSurfacePercent: numberOrNull(
-          vegetation.superficies_vegetadas_percent,
-        ),
+          grassCoveragePercent: numberOrNull(
+            vegetation.cobertura_gramada_percent,
+          ),
+
+          totalVegetatedSurfacePercent:
+            numberOrNull(
+              vegetation.superficies_vegetadas_percent,
+            ),
+        },
 
         pavement: null,
         accessibility: null,
@@ -458,8 +560,16 @@ export async function adaptSimulationToReport(
     maps: input.mapImage
       ? {
           overview: {
-            title: "Mapa da área analisada",
-            description: "Área de estudo utilizada na simulação.",
+            title: t(
+              "adapter.map.title",
+              {},
+              locale,
+            ),
+            description: t(
+              "adapter.map.description",
+              {},
+              locale,
+            ),
             dataUrl: input.mapImage,
           },
         }
