@@ -1,104 +1,104 @@
-# Smart15 — Análise de Acessibilidade Urbana
+# Smart15 — Urban Accessibility Analysis
 
-O **Smart15** é uma plataforma web de análise geoespacial voltada ao conceito de **Cidade de 15 Minutos**.
+**Smart15** is a web-based geospatial analysis platform designed around the **15-Minute City** concept.
 
-A solução estima a acessibilidade de pedestres e ciclistas a serviços e equipamentos urbanos considerando, além da distância percorrida, fatores como:
+The platform estimates pedestrian and cyclist accessibility to urban services and facilities, considering not only travel distance but also factors such as:
 
-- declividade do terreno;
-- temperatura da superfície;
-- cobertura vegetal e sombreamento;
-- características da malha viária;
-- perfil de mobilidade do usuário;
-- distribuição de serviços e equipamentos urbanos.
+- terrain slope;
+- land surface temperature;
+- vegetation cover and shading;
+- street network characteristics;
+- user mobility profile;
+- distribution of urban services and facilities.
 
-A plataforma foi construída sobre o [GeoLibre](https://github.com/opengeos/GeoLibre) e integra processamento geoespacial, visualização interativa, exportação de resultados e geração automatizada de relatórios técnicos.
+The platform is built on [GeoLibre](https://github.com/opengeos/GeoLibre) and integrates geospatial processing, interactive visualization, result export, and automated generation of technical reports.
 
-## Demonstração
+## Demo
 
 <video src="https://github.com/user-attachments/assets/db3433ff-69a3-4e4b-ba6c-fbabf08c8604" controls="controls" style="max-width: 100%;"></video>
 
-> Caso o vídeo não seja exibido diretamente, acesse o arquivo pela área de anexos do repositório no GitHub.
+> If the video is not displayed directly, access it through the repository attachments on GitHub.
 
-## Principais funcionalidades
+## Key Features
 
-- simulação de acessibilidade para diferentes perfis de mobilidade;
-- análise de acesso a serviços e equipamentos urbanos;
-- processamento de declividade, temperatura e cobertura vegetal;
-- geração de isócronas e grades hexagonais;
-- upload de arquivos GeoJSON, amostras e ortofotos;
-- visualização e inspeção interativa das camadas;
-- exportação em formatos geoespaciais;
-- geração automatizada de relatório técnico.
+- accessibility simulation for different mobility profiles;
+- analysis of access to urban services and facilities;
+- processing of terrain slope, land surface temperature, and vegetation cover;
+- generation of isochrones and hexagonal grids;
+- upload of GeoJSON files, training samples, and orthophotos;
+- interactive visualization and inspection of layers;
+- export to geospatial formats;
+- automated generation of technical reports.
 
-Consulte a [descrição completa das funcionalidades](docs/funcionalidades.md).
+See the [complete feature description](docs/funcionalidades.md).
 
-## Arquitetura
+## Architecture
 
-O Smart15 é composto por:
+Smart15 consists of:
 
-- uma interface web baseada no GeoLibre;
-- um plugin responsável pela interação com o usuário e visualização dos resultados;
-- um backend FastAPI para processamento geoespacial, roteamento, rasters e exportações;
-- fontes externas e dados fornecidos pelo usuário.
+- a web interface based on GeoLibre;
+- a plugin responsible for user interaction and result visualization;
+- a FastAPI backend for geospatial processing, routing, raster processing, and data export;
+- external data sources and user-provided data.
 
-Consulte a [visão geral da arquitetura](docs/arquitetura/visao-geral.md).
+See the [architecture overview](docs/arquitetura/visao-geral.md).
 
-## Instalação rápida
+## Quick Start
 
-### Pré-requisitos
+### Prerequisites
 
 - Git;
 - Docker;
 - Docker Compose.
 
-### Clonar e iniciar
+### Clone and Run
 
 ```bash
-git clone --recurse-submodules <URL_DO_REPOSITORIO>
+git clone --recurse-submodules <REPOSITORY_URL>
 cd Smart15-Acessibilidade
 ./scripts/start.sh
 ```
 
-Endereços padrão:
+Default addresses:
 
-- Aplicação: `http://localhost:8080`
+- Application: `http://localhost:8080`
 - Backend: `http://localhost:8000`
 - API Docs: `http://localhost:8000/docs`
 
-Para configuração de portas, logs, encerramento e solução de problemas, consulte o [guia de instalação](docs/instalacao.md).
+For port configuration, logs, shutdown procedures, and troubleshooting, see the [installation guide](docs/instalacao.md).
 
-## Estrutura do repositório
+## Repository Structure
 
 ```text
 Smart15-Acessibilidade/
-├── backend/       # API e processamento geoespacial
-├── deploy/        # Docker Compose, Dockerfiles e Nginx
-├── docs/          # Documentação técnica
-├── geolibre/      # Submódulo do GeoLibre
-├── plugin/        # Código-fonte do plugin Smart15
-├── scripts/       # Scripts de build e inicialização
+├── backend/       # API and geospatial processing
+├── deploy/        # Docker Compose, Dockerfiles, and Nginx
+├── docs/          # Technical documentation
+├── geolibre/      # GeoLibre submodule
+├── plugin/        # Smart15 plugin source code
+├── scripts/       # Build and startup scripts
 └── README.md
 ```
 
-## Documentação
+## Documentation
 
-- [Funcionalidades](docs/funcionalidades.md)
-- [Instalação](docs/instalacao.md)
-- [Desenvolvimento](docs/desenvolvimento.md)
-- [Visão geral da arquitetura](docs/arquitetura/visao-geral.md)
-- [Decisões arquiteturais](docs/adr/)
+- [Features](docs/funcionalidades.md)
+- [Installation](docs/instalacao.md)
+- [Development](docs/desenvolvimento.md)
+- [Architecture overview](docs/arquitetura/visao-geral.md)
+- [Architecture Decision Records](docs/adr/)
 
-## Equipe
+## Team
 
-- **Leandro Gregório** — concepção, arquitetura e desenvolvimento;
-- **Fábio Gregório** — desenvolvimento, integração, relatórios, testes e documentação.
+- **Leandro Gregório** — concept, architecture, and development;
+- **Fábio Gregório** — development, integration, reporting, testing, and documentation.
 
-## Projeto-base
+## Base Project
 
-O Smart15 utiliza o [GeoLibre](https://github.com/opengeos/GeoLibre) como plataforma geoespacial de base.
+Smart15 uses [GeoLibre](https://github.com/opengeos/GeoLibre) as its underlying geospatial platform.
 
-As licenças e os créditos dos projetos e bibliotecas utilizados devem ser preservados conforme seus respectivos termos.
+The licenses and attribution requirements of all projects and libraries used by Smart15 must be preserved in accordance with their respective terms.
 
-## Licença
+## License
 
-Consulte o arquivo [`LICENSE`](LICENSE) para as condições de uso e distribuição do projeto.
+See the [`LICENSE`](LICENSE) file for the project's terms of use and distribution.

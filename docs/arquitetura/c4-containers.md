@@ -1,39 +1,27 @@
+# Smart15 — Container Diagram
+
+This diagram presents the main runtime components of Smart15 and their interactions with external geospatial data sources.
+
 ```mermaid
 C4Container
-    title Smart-15 — Diagrama de Contêineres
+    title Smart15 - Container Diagram
 
-    Person(usuario, "Usuário", "Configura cenários e consulta resultados.")
+    Person(user, "User", "Configures analyses and explores results.")
 
-    System_Ext(osm, "OpenStreetMap", "Rede viária e pontos de interesse.")
-    System_Ext(planetary, "Microsoft Planetary Computer", "Imagens e dados ambientais.")
-    System_Ext(copernicus, "Copernicus DEM", "Modelo digital de elevação.")
+    System_Ext(osm, "OpenStreetMap", "Street network and points of interest.")
+    System_Ext(planetary, "Microsoft Planetary Computer", "Satellite imagery and environmental data.")
+    System_Ext(copernicus, "Copernicus DEM", "Digital elevation model.")
 
-    System_Boundary(smart15, "Smart-15") {
-
-        Container(web, "GeoLibre Web", "React / TypeScript / MapLibre", "Aplicação cartográfica acessada pelo navegador.")
-
-        Container(plugin, "Plugin Smart-15", "JavaScript ou React/TypeScript", "Painel de configuração, submissão das simulações e visualização dos resultados.")
-
-        Container(api, "Smart-15 API", "Python / FastAPI", "Expõe os serviços HTTP, valida parâmetros e coordena as análises.")
-
-        Container(engine, "Motor Geoespacial", "Python / GeoPandas / OSMnx / NetworkX / Rasterio / Scikit-learn", "Processa rede viária, rasters, declividade, temperatura, vegetação, rotas e isócronas.")
-
-        Container(report, "Gerador de Relatórios", "Python / Jinja2 / WeasyPrint", "Produz relatórios técnicos em HTML e PDF.")
-
-        ContainerDb(storage, "Armazenamento de Trabalho", "Sistema de arquivos ou Object Storage", "Mantém arquivos temporários, rasters, GeoJSON, imagens e relatórios.")
+    System_Boundary(smart15, "Smart15") {
+        Container(web, "GeoLibre Web + Smart15 Plugin", "React / TypeScript / Vite / MapLibre", "Web interface for configuration and visualization.")
+        Container(backend, "Smart15 Backend", "Python / FastAPI", "Performs geospatial processing and provides the HTTP API.")
+        Container(storage, "Temporary File Storage", "File System", "Stores temporary processing artifacts.")
     }
 
-    Rel(usuario, web, "Acessa", "HTTPS")
-    Rel(web, plugin, "Carrega e executa")
-    Rel(plugin, api, "Envia parâmetros e consulta resultados", "REST/JSON")
-    Rel(api, engine, "Solicita processamento")
-    Rel(api, report, "Solicita geração de relatório")
-    Rel(engine, osm, "Obtém rede e POIs", "HTTPS")
-    Rel(engine, planetary, "Obtém dados ambientais", "STAC/HTTPS")
-    Rel(engine, copernicus, "Obtém modelo de elevação", "HTTPS")
-    Rel(engine, storage, "Lê e grava artefatos")
-    Rel(report, storage, "Lê resultados e grava relatórios")
-    Rel(api, storage, "Disponibiliza resultados")
-    Rel(api, plugin, "Retorna status, indicadores e URLs dos artefatos", "JSON/GeoJSON")
-    Rel(plugin, web, "Adiciona camadas, isócronas e indicadores ao mapa")
+    Rel(user, web, "Uses", "HTTPS")
+    Rel(web, backend, "Sends parameters and retrieves results", "REST/JSON")
+    Rel(backend, osm, "Retrieves street network and POIs", "HTTPS")
+    Rel(backend, planetary, "Retrieves environmental data", "STAC/HTTPS")
+    Rel(backend, copernicus, "Retrieves elevation data", "HTTPS")
+    Rel(backend, storage, "Reads and writes files")
 ```

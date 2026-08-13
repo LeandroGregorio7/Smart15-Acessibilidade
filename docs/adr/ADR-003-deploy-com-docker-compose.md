@@ -1,417 +1,406 @@
-
----
-
-# `ADR-003-deploy-com-docker-compose.md`
-
-```markdown
-# ADR-003 — Implantação do Smart-15 com Docker Compose
+# ADR-003 — Deployment of Smart15 with Docker Compose
 
 ## Status
 
-Aceito.
+Accepted.
 
-## Data
+## Date
 
 2026-07-18.
 
-## Contexto
+## Context
 
-O Smart-15 deverá ser entregue para execução em ambiente de servidor da universidade.
+Smart15 is intended to run on a university-managed server environment.
 
-A aplicação possui diferentes componentes e dependências:
+The application includes multiple components and dependencies, including:
 
-- GeoLibre Web;
-- plugin Smart-15;
-- backend FastAPI;
-- bibliotecas Python geoespaciais;
-- Nginx ou outro proxy reverso;
-- diretórios de dados;
-- arquivos temporários;
-- resultados;
-- relatórios;
-- configurações de ambiente.
+* GeoLibre Web;
+* the Smart15 plugin;
+* a FastAPI backend;
+* Python geospatial libraries;
+* web-server configuration;
+* temporary processing directories;
+* exported geospatial results;
+* environment-specific configuration.
 
-O backend utiliza bibliotecas que podem exigir dependências de sistema operacional, como:
+The backend depends on a geospatial Python ecosystem that may require operating-system-level libraries and native dependencies, including technologies such as:
 
-- GDAL;
-- PROJ;
-- GEOS;
-- Rasterio;
-- GeoPandas;
-- OSMnx;
-- Scikit-learn.
+* GDAL;
+* PROJ;
+* GEOS;
+* Rasterio;
+* GeoPandas;
+* OSMnx;
+* Scikit-learn.
 
-A instalação manual dessas dependências no servidor aumentaria o risco de diferenças entre os ambientes de desenvolvimento, homologação e produção.
+Installing and configuring these dependencies manually on the target server would increase the risk of inconsistencies between development and deployment environments.
 
-O projeto precisa de um processo de implantação:
+The project therefore requires a deployment process that is:
 
-- documentado;
-- reproduzível;
-- versionado;
-- simples de executar;
-- adequado a um servidor Linux;
-- independente da estação do desenvolvedor.
+* documented;
+* reproducible;
+* version-controlled;
+* simple to execute;
+* suitable for a Linux server;
+* independent of the developer workstation.
 
-## Decisão
+## Decision
 
-O Smart-15 será implantado utilizando contêineres Docker coordenados por Docker Compose.
+Smart15 is deployed using Docker containers coordinated through Docker Compose.
 
-A implantação inicial será composta, no mínimo, pelos seguintes serviços:
+The current deployment consists of two main services:
 
 ```text
-smart15-web
-    GeoLibre Web com plugin Smart-15
+smart15-geolibre
+    GeoLibre Web with the Smart15 plugin
 
-smart15-api
-    API FastAPI e motor geoespacial
-
-reverse-proxy
-    entrada HTTP/HTTPS e roteamento
+smart15-backend
+    FastAPI API and geospatial processing
 ```
 
-Poderão ser adicionados futuramente:
+The two services communicate through a dedicated Docker network.
+
+The GeoLibre service provides the browser-accessible application, while the backend performs computationally intensive geospatial processing.
+
+The current runtime architecture is:
 
 ```text
-worker
-    processamento assíncrono
-
-redis
-    fila, cache ou estado temporário
-
-postgis
-    persistência geoespacial
-
-object-storage
-    armazenamento de grandes artefatos
+Browser
+   │
+   │ HTTP
+   ▼
+GeoLibre Web + Smart15 Plugin
+   │
+   │ HTTP / JSON / GeoJSON
+   ▼
+Smart15 Backend
+   │
+   ▼
+Temporary File Storage
 ```
 
-Arquitetura de implantação
+Docker Compose defines the services, networks, exposed ports, health checks, build instructions, and runtime dependencies.
 
-```text
-Navegador
-    │
-    │ HTTPS
-    ▼
-Nginx
-    ├── /        → GeoLibre Web
-    ├── /api     → Smart-15 API
-    ├── /files   → resultados e exportações
-    └── /reports → relatórios
+## Current Compose Services
+
+### `backend`
+
+The backend service:
+
+* is built from the Smart15 backend Dockerfile;
+* runs the FastAPI application;
+* exposes the internal application port `8000`;
+* provides a health endpoint;
+* performs geospatial processing;
+* writes generated exports to temporary storage.
+
+The external backend port can be configured through:
+
+```dotenv
+SMART15_BACKEND_PORT=8000
 ```
 
-O Nginx atuará como ponto único de acesso.
+### `geolibre`
 
-Isso permitirá que o navegador acesse frontend e backend pelo mesmo domínio, reduzindo problemas de CORS.
+The GeoLibre service:
 
-Estrutura prevista
+* provides the web-based geospatial interface;
+* includes the synchronized Smart15 plugin;
+* depends on the backend health check;
+* exposes the browser-facing web application.
+
+The external web port can be configured through:
+
+```dotenv
+SMART15_WEB_PORT=8080
+```
+
+## Deployment Structure
+
+The relevant deployment structure is:
 
 ```text
 deploy/
 ├── compose/
-│   ├── docker-compose.yml
-│   └── docker-compose.override.yml
-├── nginx/
-│   └── nginx.conf
-├── env/
-│   └── .env.example
-└── README.md
+│   └── docker-compose.yml
+├── docker/
+│   ├── backend.Dockerfile
+│   └── geolibre.Dockerfile
+└── nginx/
 ```
 
-O arquivo .env real não será versionado.
+Auxiliary scripts are maintained separately:
 
-Será fornecido apenas um arquivo .env.example.
+```text
+scripts/
+├── build-plugin.sh
+└── start.sh
+```
 
-Exemplo conceitual de Docker Compose
+Configuration defaults are provided through:
+
+```text
+.env.example
+```
+
+The local `.env` file is not intended to be version-controlled.
+
+## Automated Startup
+
+The project provides:
+
+```bash
+./scripts/start.sh
+```
+
+as the standard startup procedure.
+
+The script performs the following operations:
+
+1. validates required commands and dependencies;
+2. creates `.env` from `.env.example` when necessary;
+3. initializes the GeoLibre Git submodule when required;
+4. checks configured ports;
+5. builds the Smart15 plugin;
+6. synchronizes the plugin with GeoLibre;
+7. validates the Docker Compose configuration;
+8. builds the Docker images;
+9. starts the containers;
+10. checks published ports;
+11. validates backend availability;
+12. validates GeoLibre availability;
+13. displays the application access URLs.
+
+This script provides a reproducible entry point for deployment and reduces the number of manual steps required from the operator.
+
+## Port Configuration
+
+Default external ports are:
+
+```dotenv
+SMART15_BACKEND_PORT=8000
+SMART15_WEB_PORT=8080
+```
+
+They can be changed permanently in `.env` or overridden for a single execution:
+
+```bash
+SMART15_BACKEND_PORT=8001 \
+SMART15_WEB_PORT=8081 \
+./scripts/start.sh
+```
+
+The internal container ports remain unchanged.
+
+This allows Smart15 to coexist with other applications running on the same host without modifying the application code.
+
+## Build Strategy
+
+The current Docker Compose configuration builds the application images from the project source code.
+
+Conceptually:
 
 ```yaml
 services:
-  web:
+  backend:
     build:
-      context: ..
-      dockerfile: geolibre/Dockerfile
-    restart: unless-stopped
-    depends_on:
-      - api
+      context: ../..
+      dockerfile: deploy/docker/backend.Dockerfile
 
-  api:
+  geolibre:
     build:
-      context: ../backend
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    env_file:
-      - .env
-    volumes:
-      - smart15-data:/app/data
-      - smart15-results:/app/results
-
-  proxy:
-    image: nginx:alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - web
-      - api
-
-volumes:
-  smart15-data:
-  smart15-results:
+      context: ../..
+      dockerfile: deploy/docker/geolibre.Dockerfile
 ```
 
-O conteúdo final poderá diferir conforme a arquitetura efetivamente adotada.
+This approach is appropriate for the current delivery model because the complete application can be reconstructed from the versioned source repository.
 
-## Estratégia de imagens
+Versioned pre-built images may be introduced in future deployment workflows if required by the university infrastructure.
 
-Durante o desenvolvimento, o Compose poderá utilizar build.
+## Temporary Storage
 
-Exemplo:
+The backend uses filesystem-based temporary storage for generated processing artifacts.
 
-```yaml
-services:
-  api:
-    build:
-      context: ../backend
-```
+The current deployment includes a bind mount associated with the backend export directory.
 
-Para homologação e produção, serão utilizadas preferencialmente imagens versionadas.
+This storage may contain:
 
-Exemplo:
+* generated geospatial exports;
+* intermediate processing artifacts;
+* temporary files required during simulations.
 
-```yaml
-services:
-  api:
-    image: ghcr.io/geosmart/smart15-api:1.0.0
+The current implementation does not depend on a database or object-storage service for application execution.
 
-  web:
-    image: ghcr.io/geosmart/smart15-web:1.0.0
-```
+Long-term persistence of simulation histories is outside the current deployment scope.
 
-Não será recomendado o uso exclusivo da tag latest em produção.
+## Configuration
 
-As imagens deverão utilizar versões explícitas:
+Application configuration is provided through environment variables and the `.env` file.
 
-```text
-1.0.0
-1.0.1
-1.1.0
-```
+The project includes `.env.example` as a documented configuration template.
 
-## Publicação das imagens
+Sensitive credentials, access tokens, or environment-specific secrets should not be committed to the source repository.
 
-As imagens poderão ser publicadas no GitHub Container Registry.
+## Alternatives Considered
 
-O fluxo esperado será:
+### Manual Server Installation
 
-```text
-Commit ou tag
-    │
-    ▼
-GitHub Actions
-    │
-    ├── executa testes
-    ├── constrói as imagens
-    └── publica no registry
-    │
-    ▼
-Servidor da universidade
-    │
-    ├── docker compose pull
-    └── docker compose up -d
-```
+Python, Node.js, geospatial libraries, GeoLibre dependencies, and the web environment could be installed directly on the target server.
 
-## Configuração
+However, this approach would increase:
 
-As configurações da aplicação serão fornecidas por variáveis de ambiente.
+* environment inconsistencies;
+* deployment time;
+* support complexity;
+* dependency conflicts;
+* dependence on server-specific configuration.
 
-Exemplos:
+Containerization provides greater reproducibility and isolation.
 
-```text
-SMART15_ENV
-SMART15_API_URL
-SMART15_DATA_DIR
-SMART15_RESULTS_DIR
-SMART15_LOG_LEVEL
-SMART15_MAX_ANALYSIS_AREA
-SMART15_ALLOWED_ORIGINS
-```
+### Kubernetes or OpenShift
 
-Credenciais e tokens não deverão ser armazenados no repositório.
+Kubernetes and OpenShift provide capabilities such as:
 
-## Persistência
+* horizontal scaling;
+* high availability;
+* advanced orchestration;
+* declarative deployment;
+* integrated observability.
 
-Os dados que precisam sobreviver à recriação dos contêineres serão armazenados em volumes.
+However, they would introduce unnecessary operational complexity for the current Smart15 deployment, which consists of a small number of services running on a single server.
 
-Exemplos:
+Docker Compose is sufficient for the current deployment requirements.
 
-- resultados;
-- relatórios;
-- arquivos exportados;
-- cache de dados;
-- arquivos enviados pelo usuário;
-- logs, caso não sejam enviados para outro serviço.
+The containerized architecture does not prevent future migration to an orchestration platform if scaling or availability requirements change.
 
-Arquivos temporários poderão ser removidos após um período configurável.
+### Serverless Platforms
 
-## Backup
+Serverless platforms could simplify infrastructure management for some types of applications.
 
-A implantação deverá documentar:
+However, Smart15 performs operations that may involve:
 
-- quais volumes precisam de backup;
-- onde ficam os arquivos persistentes;
-- como restaurar os dados;
-- como exportar uma release;
-- como recuperar uma versão anterior.
+* relatively long processing times;
+* significant memory consumption;
+* native geospatial dependencies;
+* raster processing;
+* large spatial files.
 
-O código-fonte não será considerado backup dos dados produzidos.
+These characteristics make a container-based deployment more suitable for the current system.
 
-## Alternativas consideradas
+## Positive Consequences
 
-### Instalação manual no servidor
+* Reproducible runtime environment.
+* Simplified installation.
+* Isolation of geospatial dependencies.
+* Reduced dependence on host operating-system configuration.
+* Consistency between development and deployment environments.
+* Easier reconstruction of the complete application.
+* Configurable external ports.
+* Automated environment validation through `start.sh`.
+* Explicit health checks for application services.
+* Easier deployment on a Linux server.
+* Foundation for future adoption of more advanced container orchestration.
 
-A instalação manual de Python, Node.js, bibliotecas geoespaciais e Nginx seria possível.
+## Negative Consequences
 
-Entretanto, aumentaria:
+* Docker and Docker Compose are required on the target server.
+* Operators need basic familiarity with container-based environments.
+* Docker images consume additional disk space.
+* Base images and dependencies require periodic maintenance.
+* Docker Compose does not provide native high availability or horizontal orchestration.
 
-- divergências entre ambientes;
-- dificuldade de suporte;
-- risco de incompatibilidade;
-- tempo de implantação;
-- dependência do administrador do servidor.
+## Risks
 
-### Kubernetes ou OpenShift
+### Port Conflicts
 
-Kubernetes e OpenShift oferecem:
+The default ports may already be used by other applications on the target server.
 
-- escalabilidade;
-- alta disponibilidade;
-- gerenciamento avançado;
-- observabilidade;
-- deploy declarativo.
+Mitigation:
 
-Entretanto, para a primeira versão, representariam maior complexidade operacional e exigiriam infraestrutura específica.
+* validate port availability before startup;
+* allow configuration through `.env`;
+* allow temporary port overrides through environment variables.
 
-Docker Compose é suficiente para uma implantação inicial em servidor único.
+### Large Temporary Files
 
-A arquitetura em contêineres permitirá evolução futura para Kubernetes ou OpenShift.
+Raster processing and exported geospatial products may consume significant disk space.
 
-### Execução em plataformas serverless
+Mitigation:
 
-Serviços serverless poderiam simplificar parte do deploy.
+* isolate temporary export directories;
+* monitor available disk space;
+* remove obsolete temporary artifacts when appropriate;
+* establish retention policies if the volume of use increases.
 
-Entretanto, o Smart-15 possui:
+### Environment-Specific Deployment Constraints
 
-- processamento de longa duração;
-- grande uso de memória;
-- dependências nativas;
-- manipulação de arquivos grandes;
-- necessidade de armazenamento persistente.
+The university server may impose restrictions related to networking, external connectivity, firewall configuration, or Docker usage.
 
-Essas características podem não se adequar bem a ambientes serverless.
+Mitigation:
 
-### Consequências positivas
+* document required ports and dependencies;
+* validate installation on a clean Linux environment;
+* maintain deployment configuration separately from application code;
+* adapt external port mappings without changing application internals.
 
-- Ambiente reproduzível.
-- Instalação simplificada.
-- Isolamento das dependências.
-- Facilidade de atualização.
-- Possibilidade de rollback.
-- Maior consistência entre desenvolvimento e produção.
-- Menor dependência da configuração do servidor.
-- Base para futura migração para OpenShift ou Kubernetes.
-- Facilidade de entrega de imagens prontas para a universidade.
+### Failure During an Update
 
-### Consequências negativas
+Changes to the application or its dependencies may produce an invalid deployment.
 
-- Necessidade de Docker no servidor.
-- Necessidade de conhecimento básico de contêineres.
-- Gerenciamento adicional de volumes e imagens.
-- Consumo de espaço em disco.
-- Necessidade de atualização das imagens base.
-- Docker Compose não oferece alta disponibilidade nativa.
+Mitigation:
 
-### Riscos
+* use Git tags and releases to identify validated versions;
+* retain previous versions of the source code;
+* rebuild and test the environment before institutional deployment;
+* validate application health after startup.
 
-Servidor sem acesso ao registry
+### Exposed Credentials
 
-A universidade pode utilizar um servidor sem acesso externo.
+Tokens or credentials could be accidentally included in project files.
 
-Mitigação:
+Mitigation:
 
-- gerar um pacote offline;
-- exportar as imagens com docker save;
-- importar com docker load;
-- fornecer arquivos Compose e documentação.
+* use environment variables;
+* exclude `.env` from Git;
+* provide only `.env.example`;
+* review repository contents before release.
 
-### Crescimento dos arquivos
+## Validation Criteria
 
-Rasters e exportações podem consumir grande volume de armazenamento.
+The decision is considered validated because the current implementation demonstrates that:
 
-Mitigação:
+* the complete environment can be started through `./scripts/start.sh`;
+* Docker Compose builds and starts the backend and GeoLibre services;
+* the GeoLibre service waits for a healthy backend before startup;
+* external ports can be configured without changing the application code;
+* the application can be installed from the repository on another machine;
+* the GeoLibre Git submodule can be initialized automatically;
+* the Smart15 plugin can be built and synchronized automatically;
+* backend and web availability are verified during startup;
+* the installation procedure is documented and reproducible.
 
-- configurar política de retenção;
-- remover arquivos temporários;
-- monitorar espaço disponível;
-- separar dados persistentes;
-- limitar tamanho e área das simulações.
+## Future Evolution
 
-### Falha durante atualização
+If future operational requirements justify additional infrastructure, the deployment architecture may evolve to include:
 
-Uma nova imagem pode apresentar problema em produção.
+* asynchronous processing queues;
+* worker processes;
+* PostGIS persistence;
+* S3-compatible object storage;
+* centralized monitoring;
+* centralized logging;
+* Kubernetes;
+* OpenShift;
+* versioned container images in a container registry.
 
-Mitigação:
+These possibilities are not part of the current Smart15 deployment and should be treated as future architectural options rather than implemented components.
 
-- utilizar tags imutáveis;
-- manter a versão anterior;
-- documentar rollback;
-- testar as imagens antes da implantação.
+## Decision Review
 
-### Credenciais expostas
+This decision should be reviewed if:
 
-Tokens podem ser incluídos indevidamente no código ou nas imagens.
-
-Mitigação:
-
-- utilizar variáveis de ambiente;
-- manter .env fora do Git;
-- revisar imagens e workflows;
-- utilizar secrets do GitHub Actions.
-
-## Critérios de validação
-
-A decisão será considerada validada quando:
-
-- a aplicação puder ser iniciada com docker compose up -d;
-- frontend e backend forem acessíveis pelo mesmo domínio;
-- os dados persistirem após reinício;
-- uma nova versão puder ser implantada por troca de tag;
-- o rollback puder ser realizado;
-- a instalação puder ser reproduzida em um servidor Linux limpo;
-- o procedimento estiver documentado.
-
-## Evolução futura
-
-A arquitetura poderá evoluir para:
-
-- fila de tarefas;
-- múltiplos workers;
-- banco PostGIS;
-- armazenamento S3 compatível;
-- monitoramento;
-- centralização de logs;
-- Kubernetes;
-- OpenShift.
-
-Essa evolução não exigirá alterar a separação conceitual entre frontend, API e processamento.
-
-## Revisão da decisão
-
-Esta decisão deve ser revisada caso:
-
-- a universidade adote obrigatoriamente outra plataforma;
-- seja necessário escalar horizontalmente;
-- haja requisitos de alta disponibilidade;
-- o volume de processamento exija uma infraestrutura distribuída;
-- Docker Compose deixe de atender ao ambiente institucional.
+* the university mandates a different deployment platform;
+* horizontal scaling becomes necessary;
+* high-availability requirements are introduced;
+* processing workloads require distributed infrastructure;
+* Docker Compose no longer meets the operational requirements of the target environment.

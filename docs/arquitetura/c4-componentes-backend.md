@@ -1,40 +1,49 @@
+# Smart15 Backend — Component Diagram
+
+This diagram presents the main logical components of the Smart15 backend and their responsibilities in the geospatial accessibility analysis workflow.
+
 ```mermaid
-C4Component
-    title Smart-15 API — Componentes
+flowchart LR
 
-    Container_Boundary(api, "Smart-15 API") {
+    Plugin["Smart15 Plugin<br/><small>Frontend client</small>"]
 
-        Component(controller, "Controladores REST", "FastAPI Routers", "Recebem requisições, validam dados e retornam resultados.")
+    subgraph Backend["Smart15 Backend"]
 
-        Component(orchestrator, "Orquestrador de Simulação", "Python", "Coordena as etapas da análise geoespacial.")
+        API["HTTP API<br/><small>FastAPI</small>"]
 
-        Component(osmService, "Serviço OSM", "OSMnx", "Obtém e prepara rede viária e POIs.")
+        Simulation["Simulation Processing<br/><small>Python</small>"]
 
-        Component(rasterService, "Serviço de Rasters", "Rasterio / rioxarray / stackstac", "Obtém, reprojeta e processa DEM, temperatura e imagens.")
+        OSM["Street Network and POI Processing<br/><small>OSMnx / NetworkX</small>"]
 
-        Component(classifier, "Classificador de Cobertura", "Scikit-learn", "Classifica vegetação, edifícios e superfícies.")
+        Raster["Raster Processing<br/><small>Rasterio / rioxarray / stackstac</small>"]
 
-        Component(weighting, "Motor de Ponderação", "NetworkX / Python", "Calcula velocidades e custos por declividade, calor, vegetação e perfil.")
+        Classification["Land-Cover Classification<br/><small>Scikit-learn</small>"]
 
-        Component(isochrones, "Gerador de Isócronas", "GeoPandas / NetworkX", "Calcula áreas alcançáveis e agregações H3.")
+        Accessibility["Accessibility Analysis<br/><small>NetworkX / GeoPandas</small>"]
 
-        Component(exporter, "Exportador", "GeoPandas", "Produz GeoJSON, KML, Shapefile e ZIP.")
+        Spatial["Isochrone and H3 Processing<br/><small>GeoPandas / H3</small>"]
 
-        Component(report, "Gerador de Relatório", "Jinja2 / WeasyPrint", "Produz relatório explicativo em PDF.")
+        Export["Result Export<br/><small>GeoPandas</small>"]
 
-        Component(repository, "Repositório de Artefatos", "Python", "Gerencia arquivos e resultados de cada simulação.")
-    }
+        Files[("Temporary Artifacts<br/><small>File System</small>")]
+    end
 
-    Rel(controller, orchestrator, "Inicia simulação")
-    Rel(orchestrator, osmService, "Solicita rede e POIs")
-    Rel(orchestrator, rasterService, "Solicita dados ambientais")
-    Rel(orchestrator, classifier, "Solicita classificação")
-    Rel(orchestrator, weighting, "Solicita ponderação da rede")
-    Rel(orchestrator, isochrones, "Solicita cálculo de acessibilidade")
-    Rel(orchestrator, exporter, "Solicita exportações")
-    Rel(orchestrator, report, "Solicita relatório")
-    Rel(osmService, repository, "Grava artefatos")
-    Rel(rasterService, repository, "Grava rasters processados")
-    Rel(exporter, repository, "Grava arquivos")
-    Rel(report, repository, "Lê indicadores e grava PDF")
+    Plugin -->|"REST / JSON"| API
+
+    API -->|"Starts processing"| Simulation
+
+    Simulation -->|"Street network and POIs"| OSM
+    Simulation -->|"Environmental data"| Raster
+    Simulation -->|"Land-cover data"| Classification
+    Simulation -->|"Mobility and environmental factors"| Accessibility
+    Simulation -->|"Spatial accessibility results"| Spatial
+    Simulation -->|"Generated results"| Export
+
+    OSM -->|"Reads / writes"| Files
+    Raster -->|"Reads / writes"| Files
+    Classification -->|"Reads / writes"| Files
+    Spatial -->|"Writes results"| Files
+    Export -->|"Writes exported files"| Files
+
+    API -->|"Provides generated results"| Files
 ```

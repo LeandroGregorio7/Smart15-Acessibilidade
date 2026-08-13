@@ -1,35 +1,181 @@
-Smart-15 v2.0 (Geo-Analytics Metrics) O Smart-15 revoluciona o conceito de "Cidades de 15 Minutos" (15-Minute City) ao abandonar o simples cálculo de distância euclidiana. Em vez disso, esta ferramenta introduz uma física de movimento humanizada, cruzando a malha viária com dados ambientais de satélite e algoritmos de Inteligência Artificial para calcular o verdadeiro esforço e conforto térmico de pedestres e ciclistas.
+# Smart15 — Technical Overview
 
- Principais Novidades desta Versão Nesta versão 2.0, o motor de roteamento e o processamento de rasters foram totalmente reconstruídos para entregar precisão cirúrgica e automação em nuvem:
+## Overview
 
-️ Integração Cloud-Native (LST): Conexão direta com o Microsoft Planetary Computer para extração automática e gratuita da Temperatura da Superfície (Banda 10 do Landsat 9).
+Smart15 is a geospatial analysis platform designed to support accessibility studies based on the **15-Minute City** concept.
 
-⛰️ Relevo e Equação de Tobler (DEM): Escalonamento geodésico rigoroso (Graus para Metros Reais) utilizando dados do Copernicus. A inclinação real (declividade) frena ou acelera o indivíduo dinamicamente na rede do OpenStreetMap.
+Rather than relying exclusively on Euclidean distance, Smart15 estimates pedestrian and cyclist accessibility using the street network while incorporating environmental and mobility-related factors that may affect travel conditions.
 
- Motor de IA (Smart OBIA): Novo algoritmo de Classificação Baseada em Objetos (Decision Tree Classifier) que rasteriza milhares de pixéis a partir de amostras do utilizador. Classifica o asfalto, edifícios e árvores de forma massiva para injetar o Fator de Sombreamento (FIS) na rota.
+The platform combines street-network analysis, remote sensing data, geospatial processing, land-cover classification, and interactive visualization within a web-based environment built on GeoLibre.
 
-️ Escudo Anti-NaN: Proteção matemática avançada que impede a quebra da malha de roteamento em zonas de dados ausentes nas bordas dos satélites.
+## Accessibility Analysis
 
-️ Funcionalidades de Destaque  Simulação Multi-Perfil: Acessibilidade inclusiva. O algoritmo respeita diferentes velocidades e limites de tolerância térmica para Adultos, Crianças e Idosos (a pé ou de bicicleta).
+Smart15 models accessibility through the actual street network obtained from OpenStreetMap.
 
-️ Tesselação e Isócronas: Exportação simultânea de manchas contínuas de tempo (Isócronas) e agregações estatísticas hexagonais (Grelha H3 da Uber).
+The analysis considers factors such as:
 
- Preenchimento de Penalidade: Zonas além do raio de 15 minutos não ficam vazias; são ativamente mapeadas como áreas de exclusão/penalidade vermelha (> 15 min).
+- travel time through the street network;
+- terrain slope;
+- land surface temperature (LST);
+- vegetation cover and potential shading;
+- user mobility profile;
+- distribution of urban services and facilities.
 
- Visualização Interativa de Alto Nível:
+Different mobility profiles can be used to represent adults, children, and older adults traveling either on foot or by bicycle.
 
-Identificador Raio-X: Passe o rato para ler classes da IA, categorias de POIs e tempos de roteamento.
+## Digital Elevation Model and Terrain Slope
 
-Cortina Comparativa (Swipe): Analise cenários dividindo o ecrã a meio.
+Elevation data can be obtained from Copernicus DEM.
 
-Legendas Dinâmicas: Valores exatos (vmin/vmax) extraídos diretamente dos satélites para as rampas Plasma (Declividade) e Nipy Spectral (Elevação).
+Geographic coordinates are transformed into an appropriate metric coordinate reference system for spatial calculations. Terrain slope is then incorporated into the network analysis to adjust theoretical travel speeds according to topographic conditions.
 
-Exportação Segura: Geração nativa de .ZIP (SHP, GeoJSON, KML) e ferramenta integrada de Captura de Ecrã (Screenshot).
+The processing workflow uses a slope-dependent mobility model based on Tobler's hiking function to represent the effect of terrain inclination on movement.
 
- Stack Tecnológico Backend (Motor Python): FastAPI, GeoPandas, OSMnx, NetworkX, Rasterio, Scikit-learn (Decision Trees), pystac-client e stackstac. Frontend (Painel): JavaScript Puro, renderização WebGL/MapLibre para Extrusão 3D e manipulação de fontes GeoJSON.
+## Land Surface Temperature
 
- Instalação Rápida (Backend) Para garantir que o motor em nuvem funciona perfeitamente, instale as dependências:
+Smart15 integrates land surface temperature data derived from Landsat imagery accessed through Microsoft Planetary Computer.
 
-Bash pip install fastapi uvicorn geopandas osmnx networkx rasterio scikit-learn pystac-client planetary-computer stackstac rioxarray h3 Inicie o servidor:
+Thermal information can be incorporated into the accessibility model to represent the potential impact of heat exposure on mobility, particularly for profiles with different environmental tolerance parameters.
 
-Bash uvicorn main:app --reload --port 8000 Nota do Desenvolvedor: Este projeto funde cartografia, física, e saúde urbana. Analisar uma
+## Vegetation and Land-Cover Classification
+
+Vegetation and land-cover information can be obtained from remote sensing imagery or user-provided orthophotos.
+
+Smart15 includes an object-based image analysis (OBIA) workflow using a Decision Tree classifier trained from user-provided samples.
+
+The classification process can distinguish land-cover categories such as:
+
+- asphalt;
+- sidewalks;
+- buildings;
+- trees;
+- grass;
+- bare soil.
+
+Radiometric information, including the Normalized Green Red Difference Index (NGRDI), is used as part of the classification workflow.
+
+The resulting information can be incorporated into the accessibility analysis to represent the potential influence of vegetation and shading.
+
+## Handling Missing Raster Data
+
+The raster-processing workflow includes mechanisms for handling missing or invalid values.
+
+These safeguards prevent unavailable raster values, including `NaN` values near dataset boundaries, from interrupting street-network processing and accessibility calculations.
+
+## Multi-Profile Simulation
+
+Smart15 supports different pedestrian and cyclist mobility profiles.
+
+Profiles can represent:
+
+- adults;
+- children;
+- older adults;
+- walking;
+- cycling.
+
+Each profile can use different travel speeds and environmental tolerance parameters.
+
+## Isochrones and Hexagonal Grids
+
+Simulation results can be represented through two complementary spatial structures:
+
+### Isochrones
+
+Isochrones represent continuous areas that can be reached within defined travel-time intervals.
+
+### Hexagonal Grids
+
+Smart15 also uses H3 hexagonal spatial indexing to aggregate and represent accessibility indicators across the study area.
+
+The platform distinguishes travel-time ranges up to 15 minutes and can also represent areas beyond this threshold as low-accessibility or penalty areas.
+
+## Interactive Visualization
+
+Smart15 provides interactive tools for exploring simulation results.
+
+### Feature Identification
+
+Users can inspect map features and retrieve information such as:
+
+- travel time;
+- mobility profile;
+- urban facility categories;
+- environmental indicators;
+- land-cover classification results.
+
+### Comparison Swipe
+
+A swipe visualization tool allows users to compare different map configurations or scenarios by dividing the visualization area.
+
+### Dynamic Raster Legends
+
+Raster layers can display their corresponding value ranges, allowing users to interpret environmental variables such as elevation, terrain slope, and land surface temperature.
+
+### 3D Visualization
+
+When applicable, simulation layers can be rendered using MapLibre/WebGL-based 3D visualization.
+
+## Result Export
+
+Smart15 supports the export of geospatial results in formats including:
+
+- Shapefile;
+- GeoJSON;
+- KML;
+- ZIP archives containing generated outputs.
+
+The platform also provides map capture and automated technical report generation.
+
+## Technology Stack
+
+### Backend
+
+The geospatial processing backend is implemented in Python and uses technologies including:
+
+- FastAPI;
+- GeoPandas;
+- OSMnx;
+- NetworkX;
+- Rasterio;
+- Shapely;
+- Scikit-learn;
+- pystac-client;
+- stackstac.
+
+### Frontend and Geospatial Platform
+
+The user interface is implemented as a plugin integrated with GeoLibre and uses:
+
+- TypeScript;
+- JavaScript;
+- Vite;
+- React components;
+- MapLibre GL;
+- GeoJSON;
+- WebGL.
+
+### Infrastructure
+
+The execution environment uses:
+
+- Docker;
+- Docker Compose;
+- Nginx;
+- Git submodules.
+
+## System Architecture
+
+At a high level, Smart15 consists of:
+
+1. the GeoLibre web-based geospatial environment;
+2. the Smart15 frontend plugin;
+3. a FastAPI geospatial processing backend;
+4. external geospatial and remote sensing data sources;
+5. user-provided spatial data.
+
+The frontend is responsible for user interaction, configuration, visualization, and result inspection, while computationally intensive geospatial processing is performed by the backend.
+
+For installation instructions, see the [Smart15 Installation Guide](../instalacao.md).
+
+For a complete description of the platform capabilities, see [Smart15 Features](../funcionalidades.md).

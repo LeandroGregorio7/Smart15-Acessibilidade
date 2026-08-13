@@ -1,49 +1,49 @@
-# Desenvolvimento do Smart15
+# Smart15 Development Guide
 
-## Componentes principais
+## Main Components
 
-O projeto possui três componentes centrais:
+The project consists of three core components:
 
-- `backend/`: API FastAPI e processamento geoespacial;
-- `plugin/`: código-fonte do plugin Smart15;
-- `geolibre/`: submódulo da plataforma GeoLibre.
+- `backend/`: FastAPI API and geospatial processing;
+- `plugin/`: Smart15 plugin source code;
+- `geolibre/`: GeoLibre platform submodule.
 
-A infraestrutura de execução fica em `deploy/`, e os scripts auxiliares ficam em `scripts/`.
+The runtime infrastructure is located in `deploy/`, while auxiliary scripts are located in `scripts/`.
 
-## Desenvolvimento do plugin
+## Plugin Development
 
-O plugin utiliza TypeScript, Vite e componentes integrados à interface do GeoLibre.
+The plugin uses TypeScript, Vite, and components integrated into the GeoLibre interface.
 
-Para instalar as dependências do projeto:
+To install the project dependencies:
 
 ```bash
 npm install
 ```
 
-Para compilar e sincronizar o plugin com o GeoLibre:
+To build and synchronize the plugin with GeoLibre:
 
 ```bash
 ./scripts/build-plugin.sh
 ```
 
-O script:
+The script:
 
-1. compila o bundle;
-2. remove a versão anteriormente sincronizada;
-3. cria a estrutura de destino;
-4. copia o manifesto;
-5. copia o bundle;
-6. valida os arquivos resultantes.
+1. builds the plugin bundle;
+2. removes the previously synchronized version;
+3. creates the destination directory structure;
+4. copies the manifest;
+5. copies the bundle;
+6. validates the resulting files.
 
-Destino do plugin:
+Plugin destination:
 
 ```text
 geolibre/apps/geolibre-desktop/public/plugins/smart15-orquestrador/
 ```
 
-## Execução integrada
+## Integrated Execution
 
-Para compilar o plugin, construir as imagens e iniciar todo o ambiente:
+To build the plugin, build the Docker images, and start the entire environment:
 
 ```bash
 ./scripts/start.sh
@@ -51,28 +51,28 @@ Para compilar o plugin, construir as imagens e iniciar todo o ambiente:
 
 ## Backend
 
-O backend é implementado em Python com FastAPI.
+The backend is implemented in Python using FastAPI.
 
-Principais responsabilidades:
+Its main responsibilities include:
 
-- obtenção e tratamento de dados geoespaciais;
-- processamento de modelos digitais de elevação;
-- cálculo de declividade;
-- tratamento de dados térmicos e de vegetação;
-- construção e análise da rede viária;
-- geração de isócronas e grades;
-- exportação dos resultados;
-- disponibilização dos arquivos gerados.
+- retrieval and processing of geospatial data;
+- processing of digital elevation models;
+- terrain slope calculation;
+- processing of thermal and vegetation data;
+- construction and analysis of the street network;
+- generation of isochrones and grids;
+- export of results;
+- provision of generated files.
 
-A documentação interativa da API fica disponível em:
+The interactive API documentation is available at:
 
 ```text
 http://localhost:8000/docs
 ```
 
-ou na porta configurada em `SMART15_BACKEND_PORT`.
+or at the port configured in `SMART15_BACKEND_PORT`.
 
-## Estrutura relevante
+## Relevant Project Structure
 
 ```text
 Smart15-Acessibilidade/
@@ -92,33 +92,35 @@ Smart15-Acessibilidade/
 └── README.md
 ```
 
-## Submódulo GeoLibre
+## GeoLibre Submodule
 
-Para inicializar ou atualizar manualmente o submódulo:
+To manually initialize or update the submodule:
 
 ```bash
 git submodule update --init --recursive
 ```
 
-Para consultar o commit utilizado:
+To check the commit currently referenced by the project:
 
 ```bash
 git submodule status
 ```
 
-Alterações no GeoLibre devem ser tratadas separadamente das alterações do repositório principal.
+Changes to GeoLibre should be handled separately from changes to the main repository.
 
-## Cache do plugin
+## Plugin Cache
 
-Caso o GeoLibre carregue uma versão anterior do bundle, execute no console do navegador:
+If GeoLibre loads a previous version of the plugin bundle, run the following command in the browser's developer console:
 
 ```javascript
 localStorage.removeItem('geolibre.pluginBundlePins')
 ```
 
-Depois, recarregue a página com `Ctrl+Shift+R`.
+Then reload the page using `Ctrl+Shift+R`.
 
-## Validações antes de um commit
+## Pre-Commit Validation
+
+Before committing changes, run:
 
 ```bash
 git status
@@ -127,12 +129,12 @@ git diff
 ./scripts/start.sh
 ```
 
-Após a inicialização, verifique:
+After startup, verify:
 
-- aplicação web;
-- endpoint `/health` do backend;
-- documentação `/docs`;
-- carregamento do plugin;
-- execução de uma simulação;
-- geração e abertura do relatório;
-- exportação dos resultados.
+- web application access;
+- backend `/health` endpoint;
+- `/docs` API documentation;
+- plugin loading;
+- execution of a simulation;
+- technical report generation and opening;
+- result export.

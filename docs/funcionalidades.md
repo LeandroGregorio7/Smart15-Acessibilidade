@@ -1,95 +1,95 @@
-# Funcionalidades do Smart15
+# Smart15 Features
 
-## Simulação de acessibilidade
+## Accessibility Simulation
 
-O Smart15 permite realizar simulações para diferentes perfis de mobilidade, incluindo deslocamentos:
+Smart15 supports accessibility simulations for different mobility profiles, including travel:
 
-- a pé;
-- de bicicleta;
-- por adultos;
-- por crianças;
-- por idosos.
+- on foot;
+- by bicycle;
+- by adults;
+- by children;
+- by older adults.
 
-Os parâmetros de velocidade e tolerância ambiental podem variar conforme o perfil selecionado.
+Speed parameters and environmental tolerance can vary according to the selected mobility profile.
 
-## Análise de destinos urbanos
+## Urban Destination Analysis
 
-A plataforma permite avaliar o acesso a diferentes categorias de serviços e equipamentos, como:
+The platform evaluates access to different categories of urban services and facilities, such as:
 
-- escolas e creches;
-- hospitais e clínicas;
-- mercados e padarias;
-- parques e áreas verdes;
-- equipamentos culturais;
-- comércio e serviços;
-- academias e equipamentos esportivos.
+- schools and childcare facilities;
+- hospitals and clinics;
+- markets and bakeries;
+- parks and green areas;
+- cultural facilities;
+- retail and services;
+- gyms and sports facilities.
 
-## Declividade e relevo
+## Terrain Slope and Elevation
 
-O relevo pode ser obtido a partir de modelos digitais de elevação, incluindo dados Copernicus DEM.
+Terrain elevation can be obtained from digital elevation models, including Copernicus DEM data.
 
-A declividade é incorporada ao cálculo de deslocamento para representar o impacto de subidas e descidas sobre a velocidade de pedestres e ciclistas.
+Terrain slope is incorporated into travel calculations to represent the impact of uphill and downhill movement on pedestrian and cyclist speeds.
 
-## Temperatura da superfície
+## Land Surface Temperature
 
-A solução pode obter dados de temperatura da superfície por meio do Microsoft Planetary Computer e de imagens Landsat.
+The platform can retrieve land surface temperature data from Landsat imagery through Microsoft Planetary Computer.
 
-Esses dados auxiliam na identificação de regiões com maior exposição térmica e na estimativa de seu impacto sobre o conforto do deslocamento.
+These data help identify areas with greater heat exposure and estimate their potential impact on travel comfort.
 
-## Cobertura vegetal
+## Vegetation Cover
 
-A cobertura vegetal pode ser estimada com base em imagens de satélite ou em ortofotos fornecidas pelo usuário.
+Vegetation cover can be estimated from satellite imagery or user-provided orthophotos.
 
-O processamento permite classificar elementos da cobertura do solo e incorporar o efeito potencial de vegetação e sombreamento à análise.
+The processing workflow enables land-cover classification and incorporates the potential effects of vegetation and shading into the accessibility analysis.
 
-## Upload de dados
+## Data Upload
 
-A aplicação oferece suporte à inclusão de dados próprios, incluindo:
+The application supports user-provided data, including:
 
-- arquivos GeoJSON;
-- amostras para classificação;
-- ortofotos;
-- geometrias de áreas de estudo.
+- GeoJSON files;
+- training samples for classification;
+- orthophotos;
+- study area geometries.
 
-## Isócronas e agregações espaciais
+## Isochrones and Spatial Aggregation
 
-Os resultados podem ser representados por:
+Results can be represented using:
 
-- isócronas de tempo de deslocamento;
-- grades hexagonais;
-- áreas acessíveis em até 15 minutos;
-- áreas com penalidade ou baixa acessibilidade.
+- travel-time isochrones;
+- hexagonal grids;
+- areas accessible within 15 minutes;
+- areas subject to penalties or low accessibility.
 
-## Visualização interativa
+## Interactive Visualization
 
-A interface permite:
+The interface allows users to:
 
-- ativar e desativar camadas;
-- inspecionar feições no mapa;
-- consultar classes e indicadores;
-- visualizar dados ambientais;
-- comparar cenários;
-- utilizar visualização 3D quando disponível;
-- capturar o mapa da análise.
+- enable and disable layers;
+- inspect map features;
+- examine classes and indicators;
+- visualize environmental data;
+- compare scenarios;
+- use 3D visualization when available;
+- capture the analysis map.
 
-## Exportação de resultados
+## Result Export
 
-Os resultados podem ser exportados em formatos geoespaciais, incluindo:
+Results can be exported in geospatial formats, including:
 
 - GeoJSON;
 - Shapefile;
 - KML;
-- arquivo ZIP com os produtos gerados.
+- ZIP archives containing the generated outputs.
 
-## Relatório técnico automatizado
+## Automated Technical Report
 
-Ao final da simulação, a plataforma gera um relatório com:
+At the end of a simulation, the platform generates a technical report containing:
 
-- identificação da área analisada;
-- mapa da simulação;
-- resumo executivo;
-- indicadores de acessibilidade;
-- interpretação dos principais fatores;
-- avaliação de declividade, temperatura e vegetação;
-- recomendações para apoio à decisão;
-- informações sobre os perfis e parâmetros utilizados.
+- identification of the analyzed area;
+- simulation map;
+- executive summary;
+- accessibility indicators;
+- interpretation of the main contributing factors;
+- assessment of terrain slope, land surface temperature, and vegetation;
+- recommendations to support decision-making;
+- information about the mobility profiles and parameters used.

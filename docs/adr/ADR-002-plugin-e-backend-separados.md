@@ -1,334 +1,284 @@
-
----
-
-# `ADR-002-plugin-e-backend-separados.md`
-
-```markdown
-# ADR-002 — Separação entre o plugin Smart-15 e o backend geoespacial
+# ADR-002 — Separation Between the Smart15 Plugin and Geospatial Backend
 
 ## Status
 
-Aceito.
+Accepted.
 
-## Data
+## Date
 
 2026-07-18.
 
-## Contexto
+## Context
 
-O Smart-15 possui duas categorias principais de responsabilidade.
+Smart15 has two main categories of responsibilities.
 
-A primeira está relacionada à interação com o usuário:
+The first is related to user interaction and visualization:
 
-- seleção da área de análise;
-- configuração do perfil;
-- escolha dos parâmetros;
-- submissão da simulação;
-- acompanhamento do processamento;
-- exibição de camadas;
-- apresentação de indicadores;
-- download de resultados.
+- selecting the study area;
+- configuring mobility profiles;
+- selecting analysis parameters;
+- submitting simulations;
+- displaying processing status;
+- visualizing geospatial layers;
+- presenting indicators;
+- generating technical reports;
+- downloading results.
 
-A segunda está relacionada ao processamento geoespacial:
+The second is related to computationally intensive geospatial processing:
 
-- obtenção da rede viária;
-- processamento de dados do OpenStreetMap;
-- obtenção e tratamento de rasters;
-- cálculo de declividade;
-- processamento de temperatura superficial;
-- classificação de vegetação e cobertura;
-- ponderação da rede;
-- cálculo de rotas;
-- geração de isócronas;
-- agregação H3;
-- exportação de arquivos;
-- geração de relatórios.
+- retrieving the street network;
+- processing OpenStreetMap data;
+- retrieving and processing raster data;
+- calculating terrain slope;
+- processing land surface temperature;
+- classifying vegetation and land cover;
+- applying mobility and environmental factors;
+- performing network-based accessibility calculations;
+- generating isochrones;
+- performing H3 spatial aggregation;
+- exporting geospatial files.
 
-Essas duas categorias possuem características técnicas diferentes.
+These two categories have different technical requirements.
 
-A interface deve executar no navegador e permanecer responsiva.
+The user interface runs in the browser and must remain responsive during interaction and visualization.
 
-O processamento geoespacial pode consumir grande quantidade de:
+Geospatial processing, on the other hand, may require significant:
 
 - CPU;
-- memória;
-- disco;
-- tempo de execução;
-- bibliotecas nativas;
-- dados temporários.
+- memory;
+- disk space;
+- processing time;
+- native geospatial libraries;
+- temporary data storage.
 
-O navegador não é o ambiente adequado para realizar integralmente esse processamento.
+A web browser is therefore not an appropriate environment for performing the complete geospatial processing workflow.
 
-## Decisão
+## Decision
 
-A interface Smart-15 será implementada como plugin do GeoLibre.
+The Smart15 user interface is implemented as a GeoLibre plugin.
 
-O processamento geoespacial será implementado em um backend independente utilizando Python e FastAPI.
+Computationally intensive geospatial processing is implemented in a separate backend using Python and FastAPI.
 
-A comunicação entre plugin e backend ocorrerá por API HTTP.
+Communication between the plugin and backend is performed through an HTTP API.
 
-A divisão principal será:
+The main architectural separation is:
 
 ```text
-Plugin Smart-15
-    interface, interação e visualização
-
-Smart-15 API
-    validação, orquestração e disponibilização dos resultados
-
-Motor Geoespacial
-    cálculos, dados ambientais, roteamento e exportação
+Smart15 Plugin
+    │
+    │  User interface
+    │  Simulation configuration
+    │  Visualization
+    │  Technical report generation
+    │
+    │  HTTP / JSON / GeoJSON
+    ▼
+Smart15 Backend
+       │
+       ├── API and input validation
+       ├── Street-network and POI processing
+       ├── Raster processing
+       ├── Land-cover classification
+       ├── Accessibility analysis
+       ├── Isochrone and H3 processing
+       └── Geospatial result export
 ```
 
-## Responsabilidades do plugin
+This separation keeps browser-oriented responsibilities within the plugin while isolating computationally intensive processing and Python geospatial dependencies in the backend.
 
-### O plugin será responsável por:
+## Plugin Responsibilities
 
-- apresentar os controles da aplicação;
-- receber os parâmetros do usuário;
-- obter a área selecionada no mapa;
-- enviar solicitações para a API;
-- apresentar o estado da simulação;
-- consumir os resultados;
-- adicionar camadas ao GeoLibre;
-- exibir isócronas, rotas, POIs e grades;
-- exibir indicadores resumidos;
-- disponibilizar links para download e relatório;
-- apresentar mensagens de erro de forma compreensível.
+### The plugin is responsible for:
 
-### O plugin não será responsável por:
+- presenting application controls;
+- receiving user-defined parameters;
+- obtaining the study area selected on the map;
+- sending requests to the backend;
+- presenting processing status;
+- consuming backend results;
+- adding resulting layers to GeoLibre;
+- displaying isochrones, POIs, hexagonal grids, and other generated layers;
+- presenting summarized indicators;
+- generating the technical report from simulation results;
+- providing access to exported results;
+- presenting errors and processing messages in a user-understandable form;
+- supporting interface internationalization.
 
-- executar processamento raster pesado;
-- calcular rotas completas;
-- processar grandes grafos;
-- executar classificação geoespacial em larga escala;
-- armazenar arquivos de resultado;
-- gerar arquivos Shapefile, KML ou PDF.
+### The plugin is not responsible for:
 
-## Responsabilidades do backend
+- performing computationally intensive raster processing;
+- processing large street-network graphs;
+- performing large-scale geospatial classification;
+- retrieving and processing the external environmental datasets required by the analysis;
+- generating Shapefile, KML, or other backend geospatial export products.
 
-### O backend será responsável por:
+## Backend Responsibilities
 
-- validar os parâmetros recebidos;
-- criar um identificador de simulação;
-- coordenar o processamento;
-- consultar serviços externos;
-- processar a rede viária;
-- processar rasters;
-- aplicar os fatores de ponderação;
-- calcular isócronas e indicadores;
-- gerar arquivos de saída;
-- armazenar os artefatos;
-- disponibilizar os resultados;
-- gerar o relatório técnico;
-- registrar erros e informações de execução.
+### The backend is responsible for:
 
-## Contrato de comunicação
+- receiving and validating analysis parameters;
+- coordinating the geospatial processing workflow;
+- accessing external geospatial data sources;
+- retrieving and processing the street network;
+- retrieving and processing POIs;
+- processing raster data;
+- calculating terrain slope;
+- processing land surface temperature and vegetation data;
+- performing land-cover classification;
+- applying mobility and environmental factors;
+- calculating accessibility results;
+- generating isochrones and H3 aggregations;
+- generating geospatial output files;
+- managing temporary processing artifacts;
+- making generated results available to the plugin;
+- recording processing errors and execution information.
 
-O plugin enviará solicitações em JSON.
+## Communication Contract
 
-Exemplo conceitual:
+Communication between the Smart15 plugin and backend uses HTTP-based interfaces.
 
-```json
-{
-  "origin": {
-    "latitude": -22.90,
-    "longitude": -43.20
-  },
-  "profile": "adult_walking",
-  "maximum_time_minutes": 15,
-  "factors": {
-    "slope": true,
-    "temperature": true,
-    "vegetation": true
-  }
-}
-```
+Depending on the operation, the exchanged data may include:
 
-A API retornará um identificador da simulação e seu estado.
+- JSON for analysis parameters, status information, metadata, and indicators;
+- GeoJSON for vector geometries and analysis results;
+- raster data or references to raster products when required;
+- ZIP archives for grouped geospatial exports.
 
-Exemplo:
+The frontend does not depend on the internal implementation of the geospatial processing algorithms. It communicates with the backend through the API contract and consumes the resulting data and artifacts.
 
-```json
-{
-  "simulation_id": "sim-20260718-001",
-  "status": "processing"
-}
-```
+GeoJSON is therefore a data exchange format rather than an independent architectural component.
 
-Após o processamento, a API poderá retornar:
+## Alternatives Considered
 
-```json
-{
-  "simulation_id": "sim-20260718-001",
-  "status": "completed",
-  "layers": {
-    "isochrones": "/api/simulations/sim-20260718-001/isochrones.geojson",
-    "routes": "/api/simulations/sim-20260718-001/routes.geojson",
-    "pois": "/api/simulations/sim-20260718-001/pois.geojson",
-    "hexagons": "/api/simulations/sim-20260718-001/hexagons.geojson"
-  },
-  "indicators": {
-    "reachable_area_m2": 850000,
-    "reachable_pois": 37,
-    "slope_penalty_percent": 12.4,
-    "heat_penalty_percent": 8.1,
-    "vegetation_benefit_percent": 3.7
-  },
-  "exports": {
-    "zip": "/api/simulations/sim-20260718-001/export.zip",
-    "report": "/api/simulations/sim-20260718-001/report.pdf"
-  }
-}
-```
+### Perform All Processing in the Plugin
 
-## Formatos de dados
+This approach would reduce the number of deployed runtime components.
 
-Serão utilizados, conforme a necessidade:
+However, it would be unsuitable because:
 
-- JSON para parâmetros, estados e indicadores;
-- GeoJSON para camadas vetoriais;
-- PNG ou GeoTIFF para resultados raster;
-- ZIP para agrupamento de arquivos exportados;
-- PDF para relatórios;
-- HTTP para transferência dos dados.
+- browser resources are limited;
+- the required Python geospatial ecosystem would not be directly available;
+- large raster operations could block or degrade the user interface;
+- computational processing would be repeated on each client workstation;
+- geospatial processing would become strongly coupled to the frontend;
+- reproducing and controlling the computational environment would be more difficult.
 
-GeoJSON é um formato de resposta, não um componente independente da arquitetura.
+### Implement the User Interface Directly in the Backend
 
-## Alternativas consideradas
-### Implementar todo o processamento no plugin
+This alternative would allow Smart15 to be implemented as a conventional server-side web application.
 
-Essa abordagem reduziria o número de serviços.
+However, it would reduce the benefits of using GeoLibre and make the following capabilities more difficult to reuse:
 
-Entretanto, seria inadequada porque:
+- map integration;
+- layer management;
+- interactive cartographic controls;
+- GeoLibre's plugin architecture;
+- independent evolution of the user interface.
 
-- o navegador possui recursos limitados;
-- bibliotecas Python geoespaciais não estariam disponíveis;
-- grandes rasters poderiam bloquear a interface;
-- o processamento seria repetido em cada estação;
-- o código ficaria fortemente acoplado ao frontend;
-- seria difícil controlar e reproduzir o ambiente.
+### Incorporate Smart15 Processing into the GeoLibre Core
 
-### Implementar a interface diretamente no backend
+This alternative could reduce the number of separately managed application components.
 
-Essa alternativa permitiria criar uma aplicação web convencional com templates.
+However, it would increase coupling between Smart15-specific processing and the underlying geospatial platform.
 
-Entretanto, reduziria o aproveitamento do GeoLibre e dificultaria:
+The Smart15 backend has specialized Python and geospatial dependencies and an independent development lifecycle. Keeping it separate preserves the boundary between the GeoLibre platform and Smart15-specific analysis logic.
 
-- integração com o mapa;
-- criação de camadas;
-- controles interativos;
-- reutilização da arquitetura de plugins;
-- evolução independente da interface.
+## Positive Consequences
 
-### Incorporar o backend dentro do serviço interno do GeoLibre
+- Clear separation of responsibilities.
+- More responsive browser-based interface.
+- Isolation of Python and native geospatial dependencies.
+- Independent testing of frontend and backend.
+- Improved reproducibility of the processing environment.
+- Better organization of the source code.
+- Lower coupling with the GeoLibre core.
+- Possibility of reusing the backend through other clients or integrations.
+- Independent evolution of visualization and geospatial processing.
+- Easier deployment through separate containerized services.
 
-Essa alternativa diminuiria a quantidade de contêineres.
+## Negative Consequences
 
-Entretanto, criaria maior acoplamento e misturaria responsabilidades de plataforma e domínio.
+- More than one runtime component must be deployed.
+- An API contract must be defined and maintained.
+- Communication failures between frontend and backend must be handled.
+- CORS or reverse-proxy configuration may be required depending on the deployment environment.
+- Temporary processing artifacts must be managed.
+- Frontend and backend compatibility must be maintained across releases.
 
-O backend Smart-15 possui dependências geoespaciais específicas e um ciclo de evolução próprio.
+## Risks
 
-## Consequências positivas
+### Long-Running Processing
 
-- Separação clara de responsabilidades.
-- Interface mais leve e responsiva.
-- Backend reutilizável por outros clientes.
-- Possibilidade de testar frontend e backend separadamente.
-- Facilidade para escalar o processamento.
-- Isolamento das dependências Python.
-- Melhor organização do código.
-- Possibilidade de futuras integrações por API.
-- Facilidade para geração de relatórios e exportações.
-- Menor acoplamento ao núcleo do GeoLibre.
+Some geospatial analyses may require significantly more processing time than ordinary web operations.
 
-## Consequências negativas
+Mitigation:
 
-- Aumento do número de componentes implantados.
-- Necessidade de definir e manter um contrato de API.
-- Necessidade de tratamento de falhas de rede.
-- Necessidade de configurar CORS ou proxy reverso.
-- Necessidade de gerenciar arquivos e estados de simulação.
-- Maior complexidade de observabilidade.
+- provide processing status information to the user;
+- configure appropriate HTTP and infrastructure timeouts;
+- limit excessively large study areas or inputs when necessary;
+- consider asynchronous processing or processing queues if future workloads require them.
 
-## Riscos
+### Large Responses
 
-### Requisições demoradas
+Vector layers and other generated results may become large for complex study areas.
 
-Simulações podem exceder o tempo normal de uma requisição HTTP.
+Mitigation:
 
-Mitigação:
+- simplify geometries where appropriate;
+- use compression for exported products;
+- limit analysis areas when necessary;
+- evaluate more efficient geospatial formats if future requirements justify them.
 
-- utilizar processamento assíncrono;
-- retornar um identificador de simulação;
-- permitir consulta de estado;
-- configurar limites e timeouts adequados;
-- considerar fila de processamento em versões futuras.
+### Frontend and Backend Incompatibility
 
-### Respostas muito grandes
+Changes to the communication contract may cause incompatibilities between plugin and backend versions.
 
-Camadas GeoJSON podem atingir tamanhos elevados.
+Mitigation:
 
-Mitigação:
+- document interface changes;
+- test frontend/backend integration before releases;
+- maintain compatible plugin and backend versions within each Smart15 release;
+- introduce explicit API versioning if future evolution requires incompatible contracts.
 
-- simplificar geometrias;
-- disponibilizar camadas por URL;
-- utilizar compressão;
-- avaliar formatos vetoriais mais eficientes no futuro;
-- limitar a área de análise.
+## Implementation Requirements
 
-### Incompatibilidade entre frontend e API
+The backend should:
 
-Mudanças no contrato podem quebrar o plugin.
+- provide OpenAPI documentation through FastAPI;
+- validate incoming parameters;
+- return structured errors;
+- record processing logs;
+- avoid unnecessary dependence on fixed local paths or URLs;
+- use environment-based configuration where appropriate;
+- isolate temporary processing artifacts.
 
-Mitigação:
+The plugin should:
 
-- versionar a API;
-- documentar os esquemas;
-- criar testes de integração;
-- manter compatibilidade durante as releases.
+- use a configurable backend endpoint;
+- handle processing states;
+- handle communication failures;
+- avoid unnecessary dependence on absolute paths;
+- validate user inputs before submitting operations;
+- present processing errors clearly to the user.
 
-## Requisitos de implementação
+## Validation Criteria
 
-A API deverá:
+The decision is considered validated because the current implementation demonstrates that:
 
-- possuir documentação OpenAPI;
-- utilizar modelos de entrada e saída;
-- validar parâmetros;
-- retornar erros estruturados;
-- registrar logs;
-- identificar cada simulação;
-- evitar nomes globais de arquivos;
-- separar resultados por simulação;
-- não depender de URLs fixas de localhost;
-- permitir configuração por variáveis de ambiente.
+- the Smart15 plugin can submit analyses to the backend;
+- the backend can receive and process requests;
+- computationally intensive geospatial operations execute outside the browser;
+- the plugin can consume and visualize generated results;
+- resulting geospatial layers can be added to the GeoLibre map;
+- indicators and processing information can be presented through the interface;
+- geospatial results can be exported;
+- technical reports can be generated from simulation results in the plugin.
 
-O plugin deverá:
+## Decision Review
 
-- utilizar uma URL de API configurável;
-- tratar os estados de processamento;
-- tratar falhas de comunicação;
-- não depender de caminhos absolutos;
-- validar entradas antes do envio;
-- apresentar erros ao usuário.
+This decision should be reviewed if:
 
-## Critérios de validação
-
-A decisão será considerada validada quando:
-
-- o plugin conseguir iniciar uma simulação;
-- a API receber e validar a requisição;
-- a API executar ou coordenar o processamento;
-- o plugin conseguir consultar o estado;
-- o plugin carregar as camadas resultantes;
-- os indicadores puderem ser apresentados;
-- o relatório puder ser acessado pela interface.
-
-## Revisão da decisão
-
-Esta decisão deve ser revisada caso:
-
-- o processamento passe a ser suficientemente leve para execução local;
-- o GeoLibre ofereça uma arquitetura nativa adequada para serviços geoespaciais;
-- surja a necessidade de múltiplos backends especializados;
-- seja adotada uma arquitetura orientada a eventos ou filas.
+- geospatial processing becomes sufficiently lightweight to run efficiently in the client;
+- GeoLibre introduces a native architecture that better supports Smart15's geospatial processing requirements;
+- multiple specialized backend services become necessary;
+- workload requirements justify adopting asynchronous processing, event-driven communication, or processing queues.
