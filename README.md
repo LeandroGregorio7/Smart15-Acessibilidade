@@ -67,6 +67,9 @@ Default addresses:
 
 For port configuration, logs, shutdown procedures, and troubleshooting, see the [installation guide](docs/instalacao.md).
 
+## Step-by-Step How install and Run (PDF Document)
+[Smart15-Guia-de-Instalacao-Windows-PT-EN.pdf](https://github.com/user-attachments/files/31270334/Smart15-Guia-de-Instalacao-Windows-PT-EN.pdf)
+
 ## Repository Structure
 
 ```text
