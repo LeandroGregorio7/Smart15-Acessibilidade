@@ -1575,6 +1575,238 @@ const getMapInstance = (app: any) => {
     return null;
 };
 
+
+const WEB_MERCATOR_LIMIT = 20037508.342789244;
+
+type GeoJSONPosition = number[];
+
+function geoJSONFeatures(input: any): any[] {
+    if (input?.type === "FeatureCollection" && Array.isArray(input.features)) {
+        return input.features;
+    }
+    if (input?.type === "Feature") return [input];
+    if (input && (input.type === "Polygon" || input.type === "MultiPolygon")) {
+        return [{ type: "Feature", properties: {}, geometry: input }];
+    }
+    throw new Error("O GeoJSON precisa conter Polygon ou MultiPolygon (Feature, FeatureCollection ou geometria).");
+}
+
+function collectGeoJSONPositions(value: any, into: GeoJSONPosition[] = []): GeoJSONPosition[] {
+    if (!Array.isArray(value)) return into;
+    if (value.length >= 2 && typeof value[0] === "number" && typeof value[1] === "number") {
+        into.push(value);
+        return into;
+    }
+    value.forEach((child) => collectGeoJSONPositions(child, into));
+    return into;
+}
+
+function normalizePolygonGeoJSON(input: any, splitMultiPolygon = false): any {
+    const features = geoJSONFeatures(input);
+    const positions = features.flatMap((feature) =>
+        collectGeoJSONPositions(feature?.geometry?.coordinates, []),
+    );
+    if (positions.length === 0) {
+        throw new Error("O GeoJSON não contém coordenadas de polígono.");
+    }
+
+    const crsName = String(
+        input?.crs?.properties?.name ?? input?.crs?.properties?.href ?? input?.crs?.name ?? "",
+    ).toLowerCase();
+    const declaresWebMercator = /3857|900913|102100|102113|3785/.test(crsName);
+    const declaresGeographic = /4326|crs:?84|crs84/.test(crsName);
+    const hasOutOfRangeCoordinates = positions.some(
+        ([x, y]) => Math.abs(x) > 180 || Math.abs(y) > 90,
+    );
+    const hasLargeCoordinates = positions.some(
+        ([x, y]) => Math.max(Math.abs(x), Math.abs(y)) > 1000,
+    );
+    const looksLikeWebMercator = positions.every(
+        ([x, y]) => Math.abs(x) <= WEB_MERCATOR_LIMIT && Math.abs(y) <= WEB_MERCATOR_LIMIT,
+    );
+
+    let convertFromWebMercator = declaresWebMercator;
+    if (!declaresWebMercator && hasOutOfRangeCoordinates) {
+        if (declaresGeographic) {
+            throw new Error("O arquivo declara EPSG:4326/CRS84, mas contém coordenadas fora de longitude/latitude.");
+        }
+        if (crsName && !declaresGeographic) {
+            throw new Error(`SRC não suportado para reprojeção automática: ${crsName}. Exporte em EPSG:4326 ou EPSG:3857.`);
+        }
+        if (hasLargeCoordinates && looksLikeWebMercator) {
+            // Heurística para GeoJSON sem metadados CRS que ainda contém metros de EPSG:3857.
+            convertFromWebMercator = true;
+        } else {
+            throw new Error("Coordenadas fora de longitude/latitude e sem SRC reconhecido; informe EPSG:3857 ou exporte em EPSG:4326.");
+        }
+    }
+
+    const transformPosition = (position: GeoJSONPosition): GeoJSONPosition => {
+        const [x, y, ...extra] = position;
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            throw new Error("O GeoJSON contém coordenadas não numéricas.");
+        }
+        if (convertFromWebMercator) {
+            if (Math.abs(x) > WEB_MERCATOR_LIMIT || Math.abs(y) > WEB_MERCATOR_LIMIT) {
+                throw new Error("Coordenadas fora do limite válido de EPSG:3857.");
+            }
+            const longitude = (x / WEB_MERCATOR_LIMIT) * 180;
+            const earthRadius = WEB_MERCATOR_LIMIT / Math.PI;
+            const latitude = (Math.atan(Math.sinh(y / earthRadius)) * 180) / Math.PI;
+            return [longitude, latitude, ...extra];
+        }
+        if (Math.abs(x) > 180 || Math.abs(y) > 90) {
+            throw new Error("Coordenadas geográficas fora dos limites de longitude/latitude.");
+        }
+        return [...position];
+    };
+
+    const normalizeRing = (ring: any): number[][] | null => {
+        if (!Array.isArray(ring)) return null;
+        const converted: number[][] = [];
+        for (const position of ring) {
+            if (!Array.isArray(position) || position.length < 2) return null;
+            converted.push(transformPosition(position));
+        }
+        if (converted.length < 3) return null;
+        const first = converted[0];
+        const last = converted[converted.length - 1];
+        if (first[0] !== last[0] || first[1] !== last[1]) {
+            converted.push([...first]);
+        }
+        return converted.length >= 4 ? converted : null;
+    };
+
+    const normalizePolygonCoordinates = (coordinates: any): number[][][] | null => {
+        if (!Array.isArray(coordinates) || coordinates.length === 0) return null;
+        const outer = normalizeRing(coordinates[0]);
+        if (!outer) return null;
+        const holes = coordinates.slice(1)
+            .map(normalizeRing)
+            .filter((ring): ring is number[][] => ring !== null);
+        return [outer, ...holes];
+    };
+
+    const normalizedFeatures: any[] = [];
+    for (const feature of features) {
+        const geometry = feature?.geometry;
+        if (!geometry) continue;
+        const properties = feature.properties && typeof feature.properties === "object"
+            ? { ...feature.properties }
+            : {};
+        const featureId = feature.id === undefined ? {} : { id: feature.id };
+
+        if (geometry.type === "Polygon") {
+            const coordinates = normalizePolygonCoordinates(geometry.coordinates);
+            if (coordinates) {
+                normalizedFeatures.push({
+                    type: "Feature", ...featureId, properties,
+                    geometry: { type: "Polygon", coordinates },
+                });
+            }
+        } else if (geometry.type === "MultiPolygon" && Array.isArray(geometry.coordinates)) {
+            const polygons = geometry.coordinates
+                .map(normalizePolygonCoordinates)
+                .filter((polygon: number[][][] | null): polygon is number[][][] => polygon !== null);
+            if (polygons.length > 0) {
+                if (splitMultiPolygon) {
+                    for (const coordinates of polygons) {
+                        normalizedFeatures.push({
+                            type: "Feature", ...featureId, properties: { ...properties },
+                            geometry: { type: "Polygon", coordinates },
+                        });
+                    }
+                } else {
+                    normalizedFeatures.push({
+                        type: "Feature", ...featureId, properties,
+                        geometry: { type: "MultiPolygon", coordinates: polygons },
+                    });
+                }
+            }
+        }
+    }
+
+    if (normalizedFeatures.length === 0) {
+        throw new Error("Nenhuma feição Polygon/MultiPolygon com anel válido foi encontrada.");
+    }
+    // GeoJSON RFC 7946 usa coordenadas WGS84; removemos CRS legado após reprojetar.
+    return { type: "FeatureCollection", features: normalizedFeatures };
+}
+
+const SAMPLE_CLASS_ALIASES: Record<string, number> = {
+    asfalto: 1, asphalt: 1, road: 1, rua: 1, via: 1, viario: 1, pavimento: 1,
+    calcada: 2, sidewalk: 2, passeio: 2,
+    construcao: 3, building: 3, edificacao: 3, telhado: 3, casa: 3, predio: 3,
+    arvore: 4, arvores: 4, tree: 4, trees: 4, floresta: 4, forest: 4, mata: 4,
+    vegetacao: 4, arborea: 4,
+    grama: 5, graminea: 5, grass: 5, pasture: 5, pasto: 5, rasteira: 5,
+    solo: 6, terra: 6, soil: 6, terraexposta: 6, baresoil: 6, soloexposto: 6,
+};
+
+function normalizeSampleClassName(value: unknown): string {
+    return String(value ?? "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "");
+}
+
+function normalizeSampleFeatures(features: any[]): SamplePolygonFeature[] {
+    const descriptors = features.map((feature, index) => {
+        const properties = feature?.properties ?? {};
+        let rawClass = properties.classe ?? properties.class ?? properties.class_name ?? properties.className;
+        if (rawClass == null || String(rawClass).trim() === "") {
+            rawClass = properties.classe_nome ?? properties.class_label ?? properties.label;
+        }
+        const classId = properties.classe_id ?? properties.class_id ?? properties.id_classe;
+        const rawText = String(rawClass ?? "").trim();
+        const labelMatch = rawText.match(/^\s*\d+\s*[-:.)]\s*(.+)$/);
+        const labelForAlias = labelMatch ? labelMatch[1] : rawText;
+        const normalized = normalizeSampleClassName(labelForAlias);
+        const numericText = /^\d+$/.test(rawText) ? Number(rawText) : NaN;
+        const explicitClassId = classId !== undefined && classId !== null && /^\d+$/.test(String(classId).trim())
+            ? Number(classId)
+            : NaN;
+        const knownClass = SAMPLE_CLASS_ALIASES[normalized];
+        const numericClass = Number.isSafeInteger(numericText) && numericText >= 0
+            ? numericText
+            : !rawText && Number.isSafeInteger(explicitClassId) && explicitClassId >= 0
+                ? explicitClassId
+                : NaN;
+        const customLabel = rawText || (Number.isSafeInteger(explicitClassId) ? `Classe ${explicitClassId}` : "Sem classe");
+        return { feature, index, knownClass, numericClass, customLabel, normalized: normalizeSampleClassName(customLabel) || "semclasse" };
+    });
+
+    const reservedIds = new Set<number>([1, 2, 3, 4, 5, 6]);
+    descriptors.forEach((item) => {
+        if (item.knownClass !== undefined) reservedIds.add(item.knownClass);
+        if (Number.isSafeInteger(item.numericClass)) reservedIds.add(item.numericClass);
+    });
+    let nextCustomId = Math.max(6, ...Array.from(reservedIds)) + 1;
+    const customIds = new Map<string, number>();
+
+    return descriptors.map((item) => {
+        let classe = item.knownClass ?? item.numericClass;
+        if (classe === undefined || !Number.isSafeInteger(classe)) {
+            if (!customIds.has(item.normalized)) {
+                while (reservedIds.has(nextCustomId)) nextCustomId++;
+                customIds.set(item.normalized, nextCustomId);
+                reservedIds.add(nextCustomId);
+                nextCustomId++;
+            }
+            classe = customIds.get(item.normalized)!;
+        }
+        const canonicalName = SAMPLE_CLASSES[classe];
+        const classeNome = canonicalName
+            ?? (item.customLabel === "Sem classe" ? `Classe ${classe}` : item.customLabel);
+        return {
+            type: "Feature",
+            properties: { classe, classe_nome: classeNome },
+            geometry: item.feature.geometry,
+        };
+    });
+}
+
 const calculateBBox = (geojson: any) => {
     let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
     const extract = (coords: any) => {
@@ -2684,7 +2916,8 @@ export const plugin = {
                             const reader = new FileReader();
                             reader.onload = (ev: any) => {
                                 try {
-                                    geometriaGeoJSON = JSON.parse(ev.target.result);
+                                    const parsedGeoJSON = JSON.parse(String(ev.target?.result ?? "").replace(/^\uFEFF/, ""));
+                                    geometriaGeoJSON = normalizePolygonGeoJSON(parsedGeoJSON);
                                     const b = calculateBBox(geometriaGeoJSON);
                                     if(b) {
                                         bboxCapturada = [b[0][0], b[0][1], b[1][0], b[1][1]]; areaStatus.innerHTML = SVG_ICONS.SUCCESS + " Capturado!";
@@ -2698,7 +2931,10 @@ export const plugin = {
                                             mapObj.fitBounds(b, { padding: 40 }); painelPosProcessamento.style.display = "block"; appendLayerToggle(sourceId+'-fill', t("layer.studyArea"), listaCamadasInput); updateLayerStyle();
                                         }
                                     } else { areaStatus.innerHTML = SVG_ICONS.WARN + " Falha BBox."; }
-                                } catch(err) { areaStatus.innerHTML = SVG_ICONS.WARN + " Erro GeoJSON"; }
+                                } catch(err) {
+                                    console.error("[Smart15] Erro ao carregar limite geográfico:", err);
+                                    areaStatus.innerHTML = SVG_ICONS.WARN + " Erro GeoJSON (ver console)";
+                                }
                             }; reader.readAsText(file);
                         }
                     });
@@ -2732,88 +2968,8 @@ export const plugin = {
                                     throw new Error("O arquivo não é um FeatureCollection válido.");
                                 }
 
-                                const normalizedFeatures: SamplePolygonFeature[] =
-                                    parsed.features.map((feature: any, index: number) => {
-                                        if (
-                                            feature?.type !== "Feature" ||
-                                            feature?.geometry?.type !== "Polygon"
-                                        ) {
-                                            throw new Error(
-                                                `A feição ${index + 1} não é um polígono válido.`
-                                            );
-                                        }
-
-                                        const rawClass =
-                                        feature.properties?.classe
-                                        ?? feature.properties?.class;
-
-                                        const normalizeClassName = (value: unknown): string =>
-                                        String(value ?? "")
-                                            .trim()
-                                            .normalize("NFD")
-                                            .replace(/\p{Diacritic}/gu, "")
-                                            .toLowerCase();
-
-                                        const SAMPLE_CLASS_ALIASES: Record<string, number> = {
-                                          asfalto: 1,
-                                          via: 1,
-
-                                          calcada: 2,
-                                          passeio: 2,
-
-                                          construcao: 3,
-                                          telhado: 3,
-
-                                          arvore: 4,
-
-                                          grama: 5,
-                                          graminea: 5,
-                                          rasteira: 5,
-
-                                          solo: 6,
-                                          terra: 6,
-                                          terraexposta: 6,
-                                        };
-
-                                        const numericClass = Number(rawClass);
-
-                                        const classEntry = Object.entries(SAMPLE_CLASSES)
-                                        .find(([, className]) =>
-                                            normalizeClassName(className)
-                                            === normalizeClassName(rawClass),
-                                        );
-                                        const normalizedClass = normalizeClassName(rawClass);
-
-                                        const classe = Number.isInteger(numericClass)
-                                          ? numericClass
-                                          : SAMPLE_CLASS_ALIASES[normalizedClass]
-                                            ?? Number(classEntry?.[0]);
-
-                                        if (
-                                        !Number.isInteger(classe)
-                                        || SAMPLE_CLASSES[classe] === undefined
-                                        ) {
-                                        throw new Error(
-                                            `A feição ${index + 1} possui classe inválida: ${String(rawClass)}.`,
-                                        );
-                                        }
-
-                                        const classeNome =
-                                        SAMPLE_CLASSES[classe]
-                                        ?? feature.properties?.classe_nome;
-
-                                        return {
-                                            type: "Feature",
-                                            properties: {
-                                                classe,
-                                                classe_nome: classeNome
-                                            },
-                                            geometry: {
-                                                type: "Polygon",
-                                                coordinates: feature.geometry.coordinates
-                                            }
-                                        };
-                                    });
+                                const normalizedGeoJSON = normalizePolygonGeoJSON(parsed, true);
+                                const normalizedFeatures = normalizeSampleFeatures(normalizedGeoJSON.features);
 
                                 amostrasGeoJSON = {
                                     type: "FeatureCollection",
@@ -2848,9 +3004,8 @@ export const plugin = {
                                     "[Smart15] Erro ao carregar amostras:",
                                     error
                                 );
-                                sampleStatus.innerHTML =
-                                    SVG_ICONS.WARN +
-                                    " Erro ao ler o GeoJSON de amostras.";
+                                const message = error instanceof Error ? error.message : String(error);
+                                sampleStatus.textContent = "Erro ao ler amostras: " + message;
                                 sampleStatus.style.color = "#e53e3e";
                             } finally {
                                 sampleFileInput.value = "";
