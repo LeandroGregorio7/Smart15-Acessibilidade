@@ -12,6 +12,8 @@ services:
       SMART15_NOMINATIM_URL: ${SMART15_NOMINATIM_URL:-https://nominatim.openstreetmap.org/search}
       SMART15_MAX_STUDY_AREA_KM2: ${SMART15_MAX_STUDY_AREA_KM2:-100}
       SMART15_MAX_STUDY_BBOX_SPAN_DEGREES: ${SMART15_MAX_STUDY_BBOX_SPAN_DEGREES:-1.0}
+      SMART15_MAX_UPLOAD_SIZE_BYTES: ${SMART15_MAX_UPLOAD_SIZE_BYTES:-4294967296}
+      TMPDIR: /app/temp_export
     volumes:
       - ../../backend/temp_export:/app/temp_export
     healthcheck:
