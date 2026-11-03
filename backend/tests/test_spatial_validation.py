@@ -17,6 +17,17 @@ class StartPointValidationTests(unittest.TestCase):
         self.assertEqual((point.x, point.y), (-46.95, -23.5))
         self.assertEqual(label, "Praça central")
 
+    def test_accepts_map_click_inside_study_area(self):
+        point, label = resolve_start_point(self.polygon, "map", [-46.95, -23.5], "-23.500000, -46.950000")
+        self.assertTrue(self.polygon.covers(point))
+        self.assertEqual(label, "-23.500000, -46.950000")
+
+    def test_rejects_map_click_outside_or_inside_hole(self):
+        for coordinates in ([-45.9, -23.5], [-46.5, -23.5]):
+            with self.subTest(coordinates=coordinates):
+                with self.assertRaisesRegex(ValueError, "fora do polígono"):
+                    resolve_start_point(self.polygon, "map", coordinates)
+
     def test_rejects_point_outside_boundary(self):
         with self.assertRaisesRegex(ValueError, "fora do polígono"):
             resolve_start_point(self.polygon, "coordinates", [-45.9, -23.5])

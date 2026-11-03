@@ -28,14 +28,14 @@ def study_area_covers_start_point(poly, point):
 
 
 def resolve_start_point(poly, mode, coordinates=None, label=None):
-    if mode not in {"centroid", "coordinates", "address", "file"}:
+    if mode not in {"centroid", "map", "coordinates", "address", "file"}:
         raise ValueError("Método de ponto inicial inválido.")
     if mode == "centroid":
         point = poly.centroid
         if not study_area_covers_start_point(poly, point):
             raise ValueError(
                 "O centroide do polígono está fora da área (concavidade, buraco ou ilha). "
-                "Selecione coordenadas, endereço ou um ponto de arquivo."
+                "Selecione clique no mapa, coordenadas, endereço ou um ponto de arquivo."
             )
         return point, "Centroide do polígono"
 
