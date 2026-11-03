@@ -3955,10 +3955,17 @@ export const plugin = {
                             (window as any).simProgressInterval,
                           );
 
+                          const failureMessage = erro instanceof Error
+                            ? erro.message
+                            : String(erro);
                           progressLabel.innerHTML =
                             SVG_ICONS.WARN
                             + " "
-                            + t("simulation.serverFailed");
+                            + t("simulation.serverFailed")
+                            + ": ";
+                          progressLabel.appendChild(
+                            document.createTextNode(failureMessage),
+                          );
                         }
                         finally {
                           btnSimular.innerText =
