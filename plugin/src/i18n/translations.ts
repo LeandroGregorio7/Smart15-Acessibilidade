@@ -12,6 +12,41 @@ const en = {
   "ui.section.boundary":
   "1. Geographic boundary",
 
+  "origin.section": "Simulation starting point",
+  "origin.boundaryNotice": "The polygon above is required for every mode and constrains the simulation. The start point must be inside it; results are clipped to the boundary.",
+  "origin.mode.centroid": "Polygon centroid",
+  "origin.mode.coordinates": "Latitude and longitude (decimal degrees)",
+  "origin.mode.address": "Address (OpenStreetMap)",
+  "origin.mode.file": "Point file",
+  "origin.decimalHelp": "Enter latitude and longitude in separate fields and use a period (.) as the decimal separator; e.g. -23.55052. Do not use a decimal comma.",
+  "origin.latitude": "Latitude (decimal degrees)",
+  "origin.longitude": "Longitude (decimal degrees)",
+  "origin.addressLabel": "Search for an address (manual search; no autocomplete)",
+  "origin.addressPlaceholder": "Street, number, city",
+  "origin.addressResultPlaceholder": "Select a result…",
+  "origin.addressNoResults": "No results found",
+  "origin.searching": "Searching OpenStreetMap…",
+  "origin.searchMin": "Enter at least 3 characters to search.",
+  "origin.addressNotFound": "No address found; refine your search.",
+  "origin.search": "Search",
+  "origin.osmAttribution": "Geocoding: OpenStreetMap / Nominatim. Data © OpenStreetMap contributors.",
+  "origin.uploadPoints": "Upload points (GeoJSON)",
+  "origin.fileSelectPlaceholder": "Choose a point…",
+  "origin.fileHelp": "Use GeoJSON Point/MultiPoint in EPSG:4326, EPSG:3857, or EPSG:31983. Choose one point per run; then select another to repeat.",
+  "origin.centroidPending": "The backend will use the polygon centroid; it must fall inside the boundary.",
+  "origin.chooseAddress": "Select a search result inside the boundary.",
+  "origin.chooseFilePoint": "Choose one point for this simulation. You can return and choose another point afterward.",
+  "origin.pointReady": "Starting point is inside the polygon.",
+  "origin.pointOutside": "This point is outside the study boundary. Choose a point inside the polygon.",
+  "origin.fileLoaded": "{count} point(s) loaded. Choose one point for this simulation.",
+  "origin.fileTooMany": "The point file exceeds the limit of {limit} features.",
+  "origin.fileOutside": "{count} point(s) are outside the polygon. Correct the file; no points were loaded.",
+  "origin.noPointResults": "No usable point was found in the file.",
+  "origin.fileTooLarge": "The point file cannot exceed 10 MB.",
+  "origin.fileReadError": "Could not read the point file.",
+  "origin.centroidOutside": "The polygon centroid falls outside the boundary (for example, in a concavity or hole). Choose coordinates, an address, or a point from a file.",
+  "area.uploadError": "Failed to load the study boundary:",
+
   "ui.methodology": "Methodology",
   "ui.help": "Help / 3D",
 
@@ -35,6 +70,8 @@ const en = {
 
   "ui.section.visualization":
     "7. Visualization and analysis",
+
+  "ui.section.visualControls": "7. Multiple visual controls",
 
   "ui.section.vectorLayers":
     "8. Vector layers (simulations)",
@@ -1035,6 +1072,41 @@ const ptBR: Record<
   "ui.section.boundary":
     "1. Limite geográfico",
 
+  "origin.section": "Ponto inicial da simulação",
+  "origin.boundaryNotice": "O polígono acima é obrigatório em todos os modos e limita a simulação. O ponto inicial precisa estar dentro dele; os resultados são recortados no limite.",
+  "origin.mode.centroid": "Centroide do polígono",
+  "origin.mode.coordinates": "Latitude e longitude (graus decimais)",
+  "origin.mode.address": "Endereço (OpenStreetMap)",
+  "origin.mode.file": "Arquivo de pontos",
+  "origin.decimalHelp": "Informe latitude e longitude em campos separados e use ponto (.) como separador decimal; ex.: -23.55052. Não use vírgula decimal.",
+  "origin.latitude": "Latitude (graus decimais)",
+  "origin.longitude": "Longitude (graus decimais)",
+  "origin.addressLabel": "Pesquise um endereço (busca manual; sem preenchimento automático)",
+  "origin.addressPlaceholder": "Rua, número, cidade",
+  "origin.addressResultPlaceholder": "Selecione um resultado…",
+  "origin.addressNoResults": "Nenhum resultado encontrado",
+  "origin.searching": "Buscando no OpenStreetMap…",
+  "origin.searchMin": "Digite ao menos 3 caracteres para pesquisar.",
+  "origin.addressNotFound": "Nenhum endereço encontrado; refine a busca.",
+  "origin.search": "Buscar",
+  "origin.osmAttribution": "Geocodificação: OpenStreetMap / Nominatim. Dados © OpenStreetMap contributors.",
+  "origin.uploadPoints": "Carregar pontos (GeoJSON)",
+  "origin.fileSelectPlaceholder": "Escolha um ponto…",
+  "origin.fileHelp": "Use GeoJSON Point/MultiPoint em EPSG:4326, EPSG:3857 ou EPSG:31983. Escolha um ponto por execução; depois selecione outro para repetir.",
+  "origin.centroidPending": "O backend usará o centroide do polígono; ele precisa estar dentro do limite.",
+  "origin.chooseAddress": "Selecione um resultado da busca que esteja dentro do limite.",
+  "origin.chooseFilePoint": "Escolha um ponto para esta simulação. Depois, volte e selecione outro.",
+  "origin.pointReady": "Ponto inicial dentro do polígono.",
+  "origin.pointOutside": "Este ponto está fora do limite de estudo. Escolha um ponto dentro do polígono.",
+  "origin.fileLoaded": "{count} ponto(s) carregado(s). Escolha um ponto para esta simulação.",
+  "origin.fileTooMany": "O arquivo excede o limite de {limit} feições.",
+  "origin.fileOutside": "{count} ponto(s) estão fora do polígono. Corrija o arquivo; nenhum ponto foi carregado.",
+  "origin.noPointResults": "Nenhum ponto utilizável foi encontrado no arquivo.",
+  "origin.fileTooLarge": "O arquivo de pontos não pode exceder 10 MB.",
+  "origin.fileReadError": "Falha ao ler o arquivo de pontos.",
+  "origin.centroidOutside": "O centroide do polígono está fora do limite (por exemplo, em uma concavidade ou buraco). Escolha coordenadas, endereço ou um ponto de arquivo.",
+  "area.uploadError": "Erro ao carregar o limite geográfico:",
+
   "ui.methodology": "Metodologia",
   "ui.help": "Ajuda / 3D",
 
@@ -1055,6 +1127,8 @@ const ptBR: Record<
 
   "ui.section.visualization":
     "7. Visualização e análise",
+
+  "ui.section.visualControls": "Controles visuais múltiplos",
 
   "ui.section.vectorLayers":
     "8. Camadas de vetores (simulações)",
