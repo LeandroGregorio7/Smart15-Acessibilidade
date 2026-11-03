@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException,Request
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -18,6 +18,7 @@ from rasterio.env import Env
 from rasterio.features import rasterize
 from shapely.geometry import Point, Polygon, box, MultiPolygon
 from app.settings import ALLOW_ORIGINS
+from app.spatial_validation import count_geometry_vertices, resolve_start_point
 from uuid import UUID, uuid4
 import h3
 import os
@@ -29,6 +30,8 @@ from pyproj import Transformer
 import traceback
 import requests
 import hashlib
+import threading
+import time
 from starlette.datastructures import UploadFile
 from starlette.formparsers import MultiPartException
 from shapely.geometry import (
@@ -47,6 +50,17 @@ import rioxarray
 logger = logging.getLogger(__name__)
 
 MAX_PART_SIZE = 250 * 1024 * 1024  # 250 MB
+MAX_STUDY_AREA_KM2 = max(0.01, float(os.getenv("SMART15_MAX_STUDY_AREA_KM2", "100")))
+MAX_STUDY_BBOX_SPAN_DEGREES = max(0.01, float(os.getenv("SMART15_MAX_STUDY_BBOX_SPAN_DEGREES", "1.0")))
+MAX_STUDY_GEOMETRY_VERTICES = 100_000
+NOMINATIM_SEARCH_URL = os.getenv(
+    "SMART15_NOMINATIM_URL",
+    "https://nominatim.openstreetmap.org/search",
+)
+NOMINATIM_USER_AGENT = "Smart15-Acessibilidade/2.1 (https://github.com/LeandroGregorio7/Smart15)"
+_geocode_lock = threading.Lock()
+_geocode_cache: dict[tuple, tuple[float, list[dict]]] = {}
+_geocode_last_request = 0.0
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -67,6 +81,94 @@ def health():
         "status": "ok",
         "service": "smart15-api"
     }
+
+
+@app.get("/geocode")
+def geocode_address(
+    query: str = Query(..., min_length=3, max_length=200),
+    bbox: str = Query(..., description="min_lon,min_lat,max_lon,max_lat"),
+):
+    """User-triggered address search through the configurable Nominatim endpoint."""
+    global _geocode_last_request
+    normalized_query = " ".join(query.split())
+    try:
+        min_lon, min_lat, max_lon, max_lat = [float(value) for value in bbox.split(",")]
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="BBox inválida para a pesquisa do endereço.")
+    if (
+        not all(np.isfinite(value) for value in (min_lon, min_lat, max_lon, max_lat))
+        or min_lon < -180 or max_lon > 180
+        or min_lat < -90 or max_lat > 90
+        or min_lon >= max_lon or min_lat >= max_lat
+    ):
+        raise HTTPException(status_code=400, detail="BBox inválida para a pesquisa do endereço.")
+
+    cache_key = (
+        normalized_query.casefold(),
+        round(min_lon, 5), round(min_lat, 5),
+        round(max_lon, 5), round(max_lat, 5),
+    )
+    now = time.monotonic()
+    with _geocode_lock:
+        cached = _geocode_cache.get(cache_key)
+        if cached and now - cached[0] < 24 * 60 * 60:
+            return {"results": cached[1], "attribution": "© OpenStreetMap contributors"}
+
+        # Public Nominatim policy: no more than one request per second per application.
+        wait_seconds = 1.05 - (time.monotonic() - _geocode_last_request)
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
+        _geocode_last_request = time.monotonic()
+
+        params = {
+            "q": normalized_query,
+            "format": "jsonv2",
+            "limit": 5,
+            "addressdetails": 0,
+            "viewbox": f"{min_lon},{max_lat},{max_lon},{min_lat}",
+            "bounded": 1,
+        }
+        try:
+            response = requests.get(
+                NOMINATIM_SEARCH_URL,
+                params=params,
+                timeout=12,
+                headers={
+                    "User-Agent": NOMINATIM_USER_AGENT,
+                    "Referer": "https://github.com/LeandroGregorio7/Smart15",
+                },
+            )
+            response.raise_for_status()
+            raw_results = response.json()
+        except requests.RequestException as exc:
+            logger.warning("Falha na busca de endereço Nominatim: %s", exc)
+            raise HTTPException(
+                status_code=502,
+                detail="O serviço de endereços OpenStreetMap está indisponível no momento.",
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=502, detail="Resposta inválida do serviço de endereços.") from exc
+
+        results = []
+        for result in raw_results if isinstance(raw_results, list) else []:
+            try:
+                latitude = float(result["lat"])
+                longitude = float(result["lon"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not np.isfinite(latitude) or not np.isfinite(longitude):
+                continue
+            results.append({
+                "id": f"{result.get('osm_type', 'place')}-{result.get('osm_id', '')}",
+                "label": str(result.get("display_name", "Endereço sem descrição")),
+                "latitude": latitude,
+                "longitude": longitude,
+            })
+        _geocode_cache[cache_key] = (time.monotonic(), results)
+        if len(_geocode_cache) > 500:
+            oldest_key = min(_geocode_cache, key=lambda key: _geocode_cache[key][0])
+            _geocode_cache.pop(oldest_key, None)
+        return {"results": results, "attribution": "© OpenStreetMap contributors"}
 
 app.add_middleware(
     CORSMiddleware,
@@ -467,6 +569,11 @@ def create_hex_grid(poly, res=10):
     except AttributeError: latlng_to_cell, cell_to_boundary = h3.geo_to_h3, h3.h3_to_geo_boundary
     minx, miny, maxx, maxy = poly.bounds
     step = 0.0005 
+    bbox_width = maxx - minx
+    bbox_height = maxy - miny
+    estimated_samples = max(1, int(np.ceil(bbox_width / step)) * int(np.ceil(bbox_height / step)))
+    if estimated_samples > 500_000:
+        step *= np.sqrt(estimated_samples / 500_000)
     cells = set()
     for lat in np.arange(miny - step, maxy + step, step):
         for lon in np.arange(minx - step, maxx + step, step): cells.add(latlng_to_cell(lat, lon, res))
@@ -475,7 +582,14 @@ def create_hex_grid(poly, res=10):
         try:
             boundary = cell_to_boundary(c)
             hex_poly = Polygon([(lng, lat) for lat, lng in boundary])
-            if poly.intersects(hex_poly): hex_polygons.append(hex_poly)
+            if poly.intersects(hex_poly):
+                clipped_hex = hex_poly.intersection(poly)
+                if (
+                    not clipped_hex.is_empty
+                    and clipped_hex.geom_type in {"Polygon", "MultiPolygon"}
+                    and clipped_hex.area > 0
+                ):
+                    hex_polygons.append(clipped_hex)
         except: pass
     return gpd.GeoDataFrame(geometry=hex_polygons, crs="EPSG:4326")
 
@@ -613,14 +727,6 @@ async def simular_urbana(request: Request):
 
             
 
-        simulation_id, simulation_dir = create_simulation_directory()
-
-        dem_path = simulation_dir / "dem.tif"
-        veg_path = simulation_dir / "veg.tif"
-        lst_path = simulation_dir / "lst.tif"
-        samples_path = simulation_dir / "samples.geojson"
-
-        
         bbox = pacote.get("bbox")
         perfis, alvos = pacote.get('perfis', []), pacote.get('alvos', [])
 
@@ -635,8 +741,6 @@ async def simular_urbana(request: Request):
 
         formatos_saida, vis_formatos = pacote.get('formatos_export', ['shp', 'geojson']), pacote.get('formatos', ['hexagonos', 'isocronas'])
         modo_temp = pacote.get('modo_temp', 'manual')
-        
-        logger.info("--- Iniciando Nova Simulação Urbana [%s] ---",simulation_id)
         
         geometria_enviada = pacote.get("geometria")
 
@@ -676,18 +780,10 @@ async def simular_urbana(request: Request):
                     detail=f"Geometria da área de estudo inválida: {exc}",
                 ) from exc
 
-        elif bbox and len(bbox) == 4:
-            poly = box(
-                bbox[0],
-                bbox[1],
-                bbox[2],
-                bbox[3],
-            ).buffer(0)
-
         else:
             raise HTTPException(
                 status_code=400,
-                detail="Área de estudo não informada.",
+                detail="Polígono de estudo obrigatório. A bbox sozinha não substitui o limite geográfico.",
             )
 
         if poly.is_empty:
@@ -699,15 +795,82 @@ async def simular_urbana(request: Request):
         if not poly.is_valid:
             poly = poly.buffer(0)
 
-        bbox = list(poly.bounds)
-
+        if poly.is_empty or poly.geom_type not in {"Polygon", "MultiPolygon"}:
+            raise HTTPException(
+                status_code=400,
+                detail="O limite precisa ser um polígono válido (Polygon ou MultiPolygon).",
+            )
+        min_lon, min_lat, max_lon, max_lat = poly.bounds
+        if (
+            not np.isfinite([min_lon, min_lat, max_lon, max_lat]).all()
+            or min_lon < -180 or max_lon > 180
+            or min_lat < -90 or max_lat > 90
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="O polígono deve estar em EPSG:4326 (longitude/latitude).",
+            )
+        if (
+            max_lon - min_lon > MAX_STUDY_BBOX_SPAN_DEGREES
+            or max_lat - min_lat > MAX_STUDY_BBOX_SPAN_DEGREES
+        ):
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"A extensão do limite excede {MAX_STUDY_BBOX_SPAN_DEGREES:g}° em longitude ou latitude. "
+                    "Divida a área ou ajuste SMART15_MAX_STUDY_BBOX_SPAN_DEGREES no arquivo .env."
+                ),
+            )
+        vertex_count = count_geometry_vertices(poly)
+        if vertex_count > MAX_STUDY_GEOMETRY_VERTICES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"O polígono tem {vertex_count} vértices; o limite é {MAX_STUDY_GEOMETRY_VERTICES}. Simplifique a geometria antes de enviar.",
+            )
         area_metrics = calculate_area_metrics(poly)
+        area_km2 = area_metrics["area_m2"] / 1_000_000
+        if not np.isfinite(area_km2) or area_km2 <= 0:
+            raise HTTPException(status_code=400, detail="A área do polígono precisa ser maior que zero.")
+        if area_km2 > MAX_STUDY_AREA_KM2:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Área de estudo de {area_km2:.1f} km² excede o limite local de "
+                    f"{MAX_STUDY_AREA_KM2:g} km². Desenhe/divida o polígono ou ajuste "
+                    "SMART15_MAX_STUDY_AREA_KM2 no arquivo .env."
+                ),
+            )
+
+        start_point_mode = str(pacote.get("start_point_mode", "centroid"))
+        try:
+            start_point, start_point_label = resolve_start_point(
+                poly,
+                start_point_mode,
+                pacote.get("start_point"),
+                pacote.get("start_point_label"),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        simulation_id, simulation_dir = create_simulation_directory()
+        dem_path = simulation_dir / "dem.tif"
+        veg_path = simulation_dir / "veg.tif"
+        lst_path = simulation_dir / "lst.tif"
+        samples_path = simulation_dir / "samples.geojson"
+        logger.info("--- Iniciando Nova Simulação Urbana [%s] ---", simulation_id)
+        bbox = list(poly.bounds)
 
         report_stats_area = {
             **area_metrics,
             "centroide": {
                 "longitude": float(poly.centroid.x),
                 "latitude": float(poly.centroid.y),
+            },
+            "ponto_inicial": {
+                "modo": start_point_mode,
+                "nome": start_point_label,
+                "longitude": float(start_point.x),
+                "latitude": float(start_point.y),
             },
             "bbox": [float(value) for value in poly.bounds],
         }
@@ -991,7 +1154,7 @@ async def simular_urbana(request: Request):
         try: G = ox.graph_from_polygon(poly_expanded, network_type='all'); G_proj = ox.project_graph(G) 
         except: return {"status": "erro", "mensagem": "Erro na malha OSM."}
 
-        center_node = ox.distance.nearest_nodes(G, X=poly.centroid.x, Y=poly.centroid.y)
+        center_node = ox.distance.nearest_nodes(G, X=start_point.x, Y=start_point.y)
         
         dem_src = rasterio.open(simulation_dir / "dem.tif") if os.path.exists(simulation_dir / "dem.tif") else None
         lst_src = rasterio.open(simulation_dir / "lst.tif") if os.path.exists(simulation_dir / "lst.tif") else None
