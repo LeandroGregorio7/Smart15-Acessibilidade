@@ -46,9 +46,43 @@ function positiveNumberOrDefault(value: unknown, fallback: number): number {
   return parsed !== null && parsed > 0 ? parsed : fallback;
 }
 
-function kelvinToCelsius(value: unknown): number | null {
+function temperatureToCelsius(
+  value: unknown,
+  units: unknown,
+): number | null {
   const numericValue = numberOrNull(value);
-  return numericValue === null ? null : numericValue - 273.15;
+  if (numericValue === null) {
+    return null;
+  }
+
+  const normalizedUnits = typeof units === "string"
+    ? units.trim().toLowerCase().replace(/°/g, "deg").replace(/\s+/g, "")
+    : "";
+
+  let celsius: number;
+  if (["c", "degc", "celsius", "degree_celsius", "degrees_celsius"].includes(normalizedUnits)
+    || normalizedUnits.includes("celsius")) {
+    celsius = numericValue;
+  } else if (["f", "degf", "fahrenheit"].includes(normalizedUnits)
+    || normalizedUnits.includes("fahrenheit")) {
+    celsius = (numericValue - 32) * (5 / 9);
+  } else if (["k", "degk", "kelvin", "degree_kelvin", "degrees_kelvin"].includes(normalizedUnits)
+    || normalizedUnits.includes("kelvin")) {
+    celsius = numericValue - 273.15;
+  } else if (numericValue >= -100 && numericValue <= 100) {
+    // Legacy API responses did not include units. Synapse SR and the current
+    // raster pipeline send physical Celsius values in this range.
+    celsius = numericValue;
+  } else if (numericValue >= 180 && numericValue <= 360) {
+    // Backwards compatibility for older unlabelled Kelvin responses.
+    celsius = numericValue - 273.15;
+  } else {
+    return null;
+  }
+
+  return Number.isFinite(celsius) && celsius >= -100 && celsius <= 100
+    ? celsius
+    : null;
 }
 
 function firstNonEmptyString(...values: unknown[]): string | undefined {
@@ -363,12 +397,15 @@ export async function adaptSimulationToReport(
         ?? area.area_alcancavel_m2,
     );
 
-  const temperatureAverageCelsius = kelvinToCelsius(
+  const temperatureUnits = temperature.unidade ?? temperature.unit;
+  const temperatureAverageCelsius = temperatureToCelsius(
     temperature.media ?? temperature.media_aproximada,
+    temperatureUnits,
   );
 
-  const temperatureMaximumCelsius = kelvinToCelsius(
+  const temperatureMaximumCelsius = temperatureToCelsius(
     temperature.maximo ?? temperature.max,
+    temperatureUnits,
   );
 
   const weightsInput = frontendConfiguration.weights ?? {};
