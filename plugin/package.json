@@ -1,6 +1,6 @@
 {
   "name": "smart15-orquestrador",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
@@ -104,5 +104,8 @@
     "vite": "^8.0.16",
     "vite-plugin-dts": "^5.0.2",
     "vitest": "^4.1.8"
+  },
+  "dependencies": {
+    "proj4": "^2.22.0"
   }
 }
