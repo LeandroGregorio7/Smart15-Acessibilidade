@@ -19,10 +19,12 @@ from rasterio.features import rasterize
 from shapely.geometry import Point, Polygon, box, MultiPolygon
 from app.settings import ALLOW_ORIGINS
 from app.spatial_validation import count_geometry_vertices, resolve_start_point
+from app.upload_utils import format_upload_limit, get_upload_size, save_upload_in_chunks
 from uuid import UUID, uuid4
 import h3
 import os
 import zipfile
+import shutil
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import warnings
@@ -49,7 +51,12 @@ import rioxarray
 
 logger = logging.getLogger(__name__)
 
-MAX_PART_SIZE = 250 * 1024 * 1024  # 250 MB
+MAX_PART_SIZE = 16 * 1024 * 1024  # Limite somente para campos de texto do multipart.
+MAX_UPLOAD_BYTES = max(
+    1,
+    int(os.getenv("SMART15_MAX_UPLOAD_SIZE_BYTES", str(4 * 1024**3))),
+)
+MAX_REQUEST_OVERHEAD_BYTES = 64 * 1024 * 1024
 MAX_STUDY_AREA_KM2 = max(0.01, float(os.getenv("SMART15_MAX_STUDY_AREA_KM2", "100")))
 MAX_STUDY_BBOX_SPAN_DEGREES = max(0.01, float(os.getenv("SMART15_MAX_STUDY_BBOX_SPAN_DEGREES", "1.0")))
 MAX_STUDY_GEOMETRY_VERTICES = 100_000
@@ -607,6 +614,10 @@ def get_optional_upload(form, field_name: str) -> UploadFile | None:
 
     return value
 
+
+def upload_limit_detail() -> str:
+    return format_upload_limit(MAX_UPLOAD_BYTES)
+
 def calculate_path_metrics(
     graph,
     path_nodes,
@@ -680,9 +691,19 @@ def calculate_path_metrics(
 async def simular_urbana(request: Request):
     simulation_id = None
     simulation_dir = None
+    form = None
 
 
     try:
+
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                request_size = int(content_length)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Content-Length inválido.") from exc
+            if request_size > MAX_UPLOAD_BYTES + MAX_REQUEST_OVERHEAD_BYTES:
+                raise HTTPException(status_code=413, detail=upload_limit_detail())
 
         try:
             form = await request.form(
@@ -694,8 +715,8 @@ async def simular_urbana(request: Request):
             raise HTTPException(
                 status_code=413,
                 detail=(
-                    "Um dos arquivos enviados excede o limite permitido "
-                    "de 250 MB."
+                    "Os campos de texto do formulário excedem 16 MiB ou o formulário "
+                    "ultrapassou o limite de arquivos/campos."
                 ),
             ) from exc
 
@@ -724,6 +745,15 @@ async def simular_urbana(request: Request):
         file_dem = get_optional_upload(form, "file_dem")
         file_limite = get_optional_upload(form, "file_limite")
         file_samples = get_optional_upload(form, "file_samples")  
+
+        uploaded_bytes = 0
+        for uploaded_file in (file_veg, file_temp, file_dem, file_limite, file_samples):
+            if uploaded_file is not None:
+                size = get_upload_size(uploaded_file)
+                if size is not None:
+                    uploaded_bytes += size
+        if uploaded_bytes > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail=upload_limit_detail())
 
             
 
@@ -907,15 +937,15 @@ async def simular_urbana(request: Request):
         import time; t_stamp = str(int(time.time()))
         
         if file_dem:
-            dem_path.write_bytes(await file_dem.read())
+            await save_upload_in_chunks(file_dem, dem_path, MAX_UPLOAD_BYTES)
         else: baixar_raster_nuvem_stac(bbox_expanded, poly_expanded, "cop-dem-glo-30", dem_path, "dem")
             
         if file_veg:
-            veg_path.write_bytes(await file_veg.read())
+            await save_upload_in_chunks(file_veg, veg_path, MAX_UPLOAD_BYTES)
         else: baixar_raster_nuvem_stac(bbox_expanded, poly_expanded, "sentinel-2-l2a", veg_path, "veg")
 
         if file_temp:
-            lst_path.write_bytes(await file_temp.read())
+            await save_upload_in_chunks(file_temp, lst_path, MAX_UPLOAD_BYTES)
         elif modo_temp == 'auto_pc':
             download_lst_pc(bbox_expanded, simulation_dir / "lst.tif")
 
@@ -1031,7 +1061,7 @@ async def simular_urbana(request: Request):
             if file_samples and SKLEARN_AVAILABLE:
                 try:
                     logger.info("IA: Iniciando treinamento do modelo OBIA Avançado...")
-                    samples_path.write_bytes(await file_samples.read())
+                    await save_upload_in_chunks(file_samples, samples_path, MAX_UPLOAD_BYTES)
                     samples_gdf = gpd.read_file(samples_path)
 
                     with rasterio.open(simulation_dir / "veg.tif") as veg_src:
@@ -1752,6 +1782,8 @@ async def simular_urbana(request: Request):
         }
 
     except HTTPException:
+        if simulation_dir is not None:
+            shutil.rmtree(simulation_dir, ignore_errors=True)
         raise
 
     except Exception as exc:
@@ -1760,10 +1792,20 @@ async def simular_urbana(request: Request):
             simulation_id,
         )
 
+        if simulation_dir is not None:
+            shutil.rmtree(simulation_dir, ignore_errors=True)
+
         raise HTTPException(
             status_code=500,
             detail="Erro interno durante a simulação.",
         ) from exc
+
+    finally:
+        if form is not None:
+            try:
+                await form.close()
+            except Exception:
+                logger.debug("Falha ao fechar o formulário multipart.", exc_info=True)
     
 @app.get("/download_zip/{simulation_id}")
 async def download_zip(simulation_id: str):
