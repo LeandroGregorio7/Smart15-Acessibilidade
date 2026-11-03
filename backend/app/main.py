@@ -20,6 +20,11 @@ from shapely.geometry import Point, Polygon, box, MultiPolygon
 from app.settings import ALLOW_ORIGINS
 from app.spatial_validation import count_geometry_vertices, resolve_start_point
 from app.upload_utils import format_upload_limit, get_upload_size, save_upload_in_chunks
+from app.temperature_utils import (
+    lst_band_metadata,
+    normalize_lst_to_celsius,
+    temperature_raster_stats_celsius,
+)
 from uuid import UUID, uuid4
 import h3
 import os
@@ -951,28 +956,39 @@ async def simular_urbana(request: Request):
 
         # ==========================================
         # 1. LST
+        temperature_stats = None
         if os.path.exists(simulation_dir / "lst.tif"):
             try:
                 with rasterio.open(simulation_dir / "lst.tif") as src:
+                    temperature_stats = temperature_raster_stats_celsius(src, poly)
                     sc = min(1024 / src.width, 1024 / src.height)
                     if sc > 1: sc = 1.0
                     lst_data = src.read(1, out_shape=(int(src.height * sc), int(src.width * sc)), resampling=Resampling.cubic).astype(float)
-                    if src.nodata is not None: lst_data[lst_data == src.nodata] = np.nan
-                    lst_data[lst_data < -999] = np.nan; lst_data[lst_data == 0] = np.nan 
-
-                    if np.nanmax(lst_data) > 1000: lst_data = (lst_data * 0.00341802) + 149.0 - 273.15
-                    r_vis = matrix_to_png(
+                    if src.nodata is not None:
+                        lst_data[lst_data == src.nodata] = np.nan
+                    else:
+                        lst_data[lst_data == 0] = np.nan
+                    lst_units, lst_scale, lst_offset = lst_band_metadata(src)
+                    lst_data = normalize_lst_to_celsius(
                         lst_data,
-                        src.bounds,
-                        src.crs,
-                        "hot",
-                        "lst",
-                        simulation_dir,
-                        simulation_id,
+                        units=lst_units,
+                        scale=lst_scale,
+                        offset=lst_offset,
                     )
-                    if r_vis: 
-                        r_vis['cmap_css'] = 'linear-gradient(to right, #0b0000, #d30000, #ff5b00, #fffa00, #ffffff)'
-                        rasters_vis['LST (Calor)'] = r_vis
+
+                    if np.isfinite(lst_data).any():
+                        r_vis = matrix_to_png(
+                            lst_data,
+                            src.bounds,
+                            src.crs,
+                            "hot",
+                            "lst",
+                            simulation_dir,
+                            simulation_id,
+                        )
+                        if r_vis:
+                            r_vis['cmap_css'] = 'linear-gradient(to right, #0b0000, #d30000, #ff5b00, #fffa00, #ffffff)'
+                            rasters_vis['LST (Calor)'] = r_vis
             except Exception as e: logger.error(f"Erro LST: {e}")
         # 2. DEM e DECLIVIDADE
         if os.path.exists(simulation_dir / "dem.tif"):
@@ -1222,10 +1238,16 @@ async def simular_urbana(request: Request):
                 try:
                     x, y = trans_lst.transform(mid_x, mid_y)
                     val = list(lst_src.sample([(x, y)]))[0][0]
-                    if not np.isnan(val) and val > -999 and val != lst_src.nodata and val != 0:
-                        if val > 1000: val = (val * 0.00341802) + 149.0 - 273.15
-                        elif 200 < val < 350: val = val - 273.15 
-                        data['lst'] = np.clip(val, 10, 50)
+                    if np.isfinite(val) and val != 0 and (lst_src.nodata is None or val != lst_src.nodata):
+                        units, scale, offset = lst_band_metadata(lst_src)
+                        celsius = normalize_lst_to_celsius(
+                            np.asarray([val]),
+                            units=units,
+                            scale=scale,
+                            offset=offset,
+                        )[0]
+                        if np.isfinite(celsius):
+                            data['lst'] = float(celsius)
                 except: pass
 
             data['fis'] = 1.0
@@ -1727,12 +1749,7 @@ async def simular_urbana(request: Request):
                     ),
                 )
 
-        report_stats["rasters"]["temperatura"] = (
-            get_raster_visual_stats(
-                rasters_vis,
-                "LST (Calor)",
-            )
-        )
+        report_stats["rasters"]["temperatura"] = temperature_stats
 
         report_stats["rasters"]["elevacao"] = (
             get_raster_visual_stats(
