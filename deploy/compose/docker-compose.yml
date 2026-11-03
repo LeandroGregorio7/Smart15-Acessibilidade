@@ -8,6 +8,10 @@ services:
     restart: unless-stopped
     ports:
       - "${SMART15_BACKEND_PORT:-8000}:8000"
+    environment:
+      SMART15_NOMINATIM_URL: ${SMART15_NOMINATIM_URL:-https://nominatim.openstreetmap.org/search}
+      SMART15_MAX_STUDY_AREA_KM2: ${SMART15_MAX_STUDY_AREA_KM2:-100}
+      SMART15_MAX_STUDY_BBOX_SPAN_DEGREES: ${SMART15_MAX_STUDY_BBOX_SPAN_DEGREES:-1.0}
     volumes:
       - ../../backend/temp_export:/app/temp_export
     healthcheck:
