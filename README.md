@@ -75,6 +75,10 @@ The boundary and uploaded point files accept GeoJSON in EPSG:4326, EPSG:3857, or
 
 Address search uses the configurable `SMART15_NOMINATIM_URL`, caches results, does not autocomplete, and identifies the application to Nominatim. The interface displays OpenStreetMap attribution. The public service has a strict maximum of one request per second; see the [Nominatim usage policy](https://operations.osmfoundation.org/policies/nominatim/).
 
+### Large raster uploads
+
+The default maximum is **4 GiB total for uploaded files per simulation** (`SMART15_MAX_UPLOAD_SIZE_BYTES`), and the Nginx proxy accepts requests up to 5 GiB to allow multipart overhead. Large uploads are streamed to the mounted `backend/temp_export` volume and copied to disk in chunks rather than loaded completely into backend RAM. Keep at least about twice the raster size free on the Docker host while the upload is being staged and copied; a 2.05 GB orthophoto is within the default limit. Rebuild/recreate the containers after changing this code or the setting.
+
 After pulling a version that contains these changes, rebuild and recreate the Docker services from the repository root:
 
 ```bash
