@@ -261,6 +261,7 @@ const painelHtml = `
       <div class="s15-text" data-i18n="origin.boundaryNotice" style="font-size: 10px; line-height: 1.5; background: #fffaf0; border: 1px solid #f6ad55; border-radius: 4px; padding: 8px; margin-bottom: 8px;">O polígono acima é obrigatório em todos os modos e limita a simulação. O ponto inicial precisa estar dentro dele; resultados fora do limite são recortados.</div>
       <select id="startPointMode" class="s15-border s15-card s15-text" style="width: 100%; padding: 7px; border-radius: 4px; border-width: 1px; font-size: 11px; margin-bottom: 8px;">
         <option value="centroid" data-i18n="origin.mode.centroid">Centroide do polígono</option>
+        <option value="map" data-i18n="origin.mode.map">Clicar no mapa (dentro do polígono)</option>
         <option value="coordinates" data-i18n="origin.mode.coordinates">Latitude e longitude (graus decimais)</option>
         <option value="address" data-i18n="origin.mode.address">Endereço (OpenStreetMap)</option>
         <option value="file" data-i18n="origin.mode.file">Arquivo de pontos</option>
@@ -2404,6 +2405,18 @@ export const plugin = {
                         startPointStatus.textContent = message;
                         startPointStatus.style.color = color;
                     };
+                    let clickedStartPoint: SimulationStartPoint | null = null;
+                    let startPointClickMap: any = null;
+                    let startPointCursorMap: any = null;
+                    let originalStartPointCursor = "";
+                    const clearStartPointMarker = (mapObj = getMapInstance(app)) => {
+                        const source = mapObj?.getSource?.("smart15-selected-start-point");
+                        if (source) source.setData({ type: "FeatureCollection", features: [] });
+                    };
+                    const clearClickedStartPoint = () => {
+                        clickedStartPoint = null;
+                        clearStartPointMarker();
+                    };
                     const pointInsideBoundary = (point: SimulationStartPoint) =>
                         Boolean(geometriaGeoJSON)
                         && polygonGeoJSONCoversPoint(
@@ -2417,6 +2430,10 @@ export const plugin = {
                         startPointFileFields.style.display = startPointMode.value === "file" ? "block" : "none";
                         if (startPointMode.value === "centroid") {
                             setStartPointStatus(t("origin.centroidPending"));
+                        } else if (startPointMode.value === "map") {
+                            setStartPointStatus(clickedStartPoint
+                                ? `${t("origin.pointReady")} ${clickedStartPoint.label}`
+                                : t("origin.chooseMapPoint"), clickedStartPoint ? "#2f855a" : "#4a5568");
                         } else if (startPointMode.value === "address") {
                             setStartPointStatus(t("origin.chooseAddress"));
                         } else if (startPointMode.value === "file") {
@@ -2424,6 +2441,7 @@ export const plugin = {
                         } else {
                             setStartPointStatus("");
                         }
+                        updateStartPointMapBinding();
                     };
                     const validateStartPoint = (point: SimulationStartPoint): SimulationStartPoint => {
                         if (!geometriaGeoJSON) {
@@ -2470,7 +2488,90 @@ export const plugin = {
                             if (!point) throw new Error(t("origin.chooseFilePoint"));
                             return validateStartPoint(point);
                         }
+                        if (startPointMode.value === "map") {
+                            if (!clickedStartPoint) throw new Error(t("origin.chooseMapPoint"));
+                            return validateStartPoint(clickedStartPoint);
+                        }
                         throw new Error("Selecione um método válido para o ponto inicial.");
+                    };
+
+                    const handleStartPointMapClick = (event: any) => {
+                        if (startPointMode.value !== "map") return;
+                        if (!geometriaGeoJSON) {
+                            setStartPointStatus(t("simulation.areaRequired"), "#c53030");
+                            return;
+                        }
+                        clickedStartPoint = null;
+                        clearStartPointMarker(startPointClickMap);
+                        const longitude = Number(event?.lngLat?.lng);
+                        const latitude = Number(event?.lngLat?.lat);
+                        const point: SimulationStartPoint = {
+                            id: "map-click",
+                            label: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
+                            longitude,
+                            latitude,
+                        };
+                        try {
+                            clickedStartPoint = validateStartPoint(point);
+                            const mapObj = startPointClickMap;
+                            if (mapObj) {
+                                const pointData = {
+                                    type: "FeatureCollection",
+                                    features: [{
+                                        type: "Feature",
+                                        properties: {},
+                                        geometry: { type: "Point", coordinates: [longitude, latitude] },
+                                    }],
+                                };
+                                const sourceId = "smart15-selected-start-point";
+                                const source = mapObj.getSource(sourceId);
+                                if (source) source.setData(pointData);
+                                else mapObj.addSource(sourceId, { type: "geojson", data: pointData });
+                                if (!mapObj.getLayer(`${sourceId}-circle`)) {
+                                    mapObj.addLayer({
+                                        id: `${sourceId}-circle`,
+                                        type: "circle",
+                                        source: sourceId,
+                                        paint: {
+                                            "circle-radius": 8,
+                                            "circle-color": "#e53e3e",
+                                            "circle-stroke-color": "#ffffff",
+                                            "circle-stroke-width": 2,
+                                        },
+                                    });
+                                }
+                            }
+                            setStartPointStatus(`${t("origin.pointReady")} ${point.label}`, "#2f855a");
+                        } catch (error) {
+                            setStartPointStatus(error instanceof Error ? error.message : String(error), "#c53030");
+                        }
+                    };
+                    const updateStartPointMapBinding = () => {
+                        const mapObj = getMapInstance(app);
+                        if (startPointClickMap !== mapObj) {
+                            if (startPointClickMap) {
+                                startPointClickMap.off?.("click", handleStartPointMapClick);
+                                if (startPointCursorMap === startPointClickMap) {
+                                    const previousCanvas = startPointClickMap.getCanvas?.();
+                                    if (previousCanvas) previousCanvas.style.cursor = originalStartPointCursor;
+                                    startPointCursorMap = null;
+                                }
+                            }
+                            startPointClickMap = mapObj;
+                            startPointClickMap?.on?.("click", handleStartPointMapClick);
+                        }
+                        const canvas = mapObj?.getCanvas?.();
+                        if (!canvas) return;
+                        if (startPointMode.value === "map") {
+                            if (startPointCursorMap !== mapObj) {
+                                startPointCursorMap = mapObj;
+                                originalStartPointCursor = canvas.style.cursor;
+                            }
+                            canvas.style.cursor = "crosshair";
+                        } else if (startPointCursorMap === mapObj) {
+                            canvas.style.cursor = originalStartPointCursor;
+                            startPointCursorMap = null;
+                        }
                     };
 
                     startPointMode.addEventListener("change", updateStartPointMode);
@@ -2971,6 +3072,8 @@ export const plugin = {
                             isDrawingMode = false;
 
                             if (!isSample && geometriaGeoJSON && bboxCapturada) {
+                                clearClickedStartPoint();
+                                if (startPointMode.value === "map") setStartPointStatus(t("origin.chooseMapPoint"));
                                 areaStatus.innerHTML = SVG_ICONS.SUCCESS + " Capturado!";
                                 areaStatus.style.color = "#2f855a";
                                 areaCoords.innerText = "BBox: [" + bboxCapturada[0].toFixed(4) + ", " + bboxCapturada[1].toFixed(4) + ", " + bboxCapturada[2].toFixed(4) + ", " + bboxCapturada[3].toFixed(4) + "]";
@@ -3126,6 +3229,7 @@ export const plugin = {
 
                     btnReset.addEventListener("click", () => {
                         const mapObj = getMapInstance(app);
+                        clearClickedStartPoint();
                         removeSampleLayers();
                         setSatelliteVisibility(false);
                         basemapSelect.value = "default";
@@ -3172,6 +3276,7 @@ export const plugin = {
                     hiddenInput.addEventListener("change", (e: any) => {
                         const file = e.target.files[0]; if (file) {
                             areaStatus.innerHTML = SVG_ICONS.LOAD + " Lendo...";
+                            clearClickedStartPoint();
                             geometriaGeoJSON = null;
                             bboxCapturada = null;
                             areaCoords.innerText = "";
