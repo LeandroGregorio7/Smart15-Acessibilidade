@@ -2,6 +2,12 @@
 import { openPrintableReport } from "./report/report.generator";
 import { adaptSimulationToReport } from "./report/report.adapter";
 import { captureMapAsDataUrl } from "./report/map.capture";
+import {
+  createCoordinateTransformer,
+  normalizePointGeoJSON,
+  parseDecimalDegrees,
+  polygonGeoJSONCoversPoint,
+} from "./lib/geospatial";
 
 import {
   getLocale,
@@ -248,6 +254,40 @@ const painelHtml = `
       </div>
       <div id="areaStatus" class="s15-text" data-i18n="area.noneDefined" style="font-size: 11px; margin-top: 6px; font-style: italic;">Nenhum limite definido</div>
       <div id="areaCoords" style="font-family: monospace; font-size: 10px; color: #c05621; margin-top: 4px; word-break: break-all;"></div>
+    </div>
+
+    <div style="margin-bottom: 24px; border-top: 1px solid; padding-top: 16px;" class="s15-border">
+      <label class="s15-label" data-i18n="origin.section" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 6px;">Ponto inicial da simulação</label>
+      <div class="s15-text" data-i18n="origin.boundaryNotice" style="font-size: 10px; line-height: 1.5; background: #fffaf0; border: 1px solid #f6ad55; border-radius: 4px; padding: 8px; margin-bottom: 8px;">O polígono acima é obrigatório em todos os modos e limita a simulação. O ponto inicial precisa estar dentro dele; resultados fora do limite são recortados.</div>
+      <select id="startPointMode" class="s15-border s15-card s15-text" style="width: 100%; padding: 7px; border-radius: 4px; border-width: 1px; font-size: 11px; margin-bottom: 8px;">
+        <option value="centroid" data-i18n="origin.mode.centroid">Centroide do polígono</option>
+        <option value="coordinates" data-i18n="origin.mode.coordinates">Latitude e longitude (graus decimais)</option>
+        <option value="address" data-i18n="origin.mode.address">Endereço (OpenStreetMap)</option>
+        <option value="file" data-i18n="origin.mode.file">Arquivo de pontos</option>
+      </select>
+      <div id="startPointCoordinateFields" style="display:none;">
+        <div class="s15-text" data-i18n="origin.decimalHelp" style="font-size: 10px; margin-bottom: 6px;">Informe latitude e longitude em campos separados e use ponto (.) como separador decimal; ex.: -23.55052. Não use vírgula decimal.</div>
+        <label class="s15-text" data-i18n="origin.latitude" style="display:block; font-size:10px; margin-bottom:3px;">Latitude (graus decimais)</label>
+        <input id="startLatitude" type="text" inputmode="decimal" placeholder="-23.55052" class="s15-border s15-text" style="width:100%; box-sizing:border-box; padding:6px; margin-bottom:6px;">
+        <label class="s15-text" data-i18n="origin.longitude" style="display:block; font-size:10px; margin-bottom:3px;">Longitude (graus decimais)</label>
+        <input id="startLongitude" type="text" inputmode="decimal" placeholder="-46.633308" class="s15-border s15-text" style="width:100%; box-sizing:border-box; padding:6px;">
+      </div>
+      <div id="startPointAddressFields" style="display:none;">
+        <label for="startAddressQuery" class="s15-text" data-i18n="origin.addressLabel" style="display:block; font-size:10px; margin-bottom:3px;">Pesquise um endereço (busca manual; não é preenchimento automático)</label>
+        <div style="display:flex; gap:4px;">
+          <input id="startAddressQuery" type="search" maxlength="200" class="s15-border s15-text" style="min-width:0; flex:1; padding:6px;" placeholder="Rua, número, cidade" data-i18n-placeholder="origin.addressPlaceholder">
+          <button id="btnSearchAddress" class="s15-btn-normal" type="button" data-i18n="origin.search" style="padding:6px; border-radius:4px; cursor:pointer;">Buscar</button>
+        </div>
+        <select id="startAddressResults" class="s15-border s15-text" style="display:none; width:100%; margin-top:6px; padding:6px;" aria-label="Resultados de endereço" data-i18n-aria-label="origin.addressLabel"></select>
+        <div class="s15-text" data-i18n="origin.osmAttribution" style="font-size:9px; margin-top:5px;">Geocodificação: OpenStreetMap / Nominatim. Dados © OpenStreetMap contributors.</div>
+      </div>
+      <div id="startPointFileFields" style="display:none;">
+        <input type="file" id="startPointFileInput" accept=".geojson,.json,application/geo+json,application/json" style="display:none;">
+        <button id="btnUploadStartPoints" type="button" class="s15-btn-normal" data-i18n="origin.uploadPoints" style="width:100%; padding:7px; border-radius:4px; cursor:pointer;">Carregar pontos (GeoJSON)</button>
+        <div class="s15-text" data-i18n="origin.fileHelp" style="font-size:10px; margin-top:5px;">Use GeoJSON Point/MultiPoint em EPSG:4326, EPSG:3857 ou EPSG:31983. Escolha um ponto por execução; depois selecione outro para repetir.</div>
+        <select id="startPointFileResults" class="s15-border s15-text" style="display:none; width:100%; margin-top:6px; padding:6px;"></select>
+      </div>
+      <div id="startPointStatus" class="s15-text" style="font-size:10px; margin-top:7px;"></div>
     </div>
 
     <div style="margin-bottom: 24px; border-top: 1px solid; padding-top: 16px;" class="s15-border">
@@ -1350,6 +1390,14 @@ const SAMPLE_CLASSES: Record<number, string> = {
 };
 
 type BBox = [number, number, number, number];
+type SimulationStartPoint = {
+    id: string;
+    label: string;
+    longitude: number;
+    latitude: number;
+};
+
+const MAX_START_POINTS = 500;
 
 let bboxCapturada: BBox | null = null;
 let geometriaGeoJSON: any = null;
@@ -1576,8 +1624,6 @@ const getMapInstance = (app: any) => {
 };
 
 
-const WEB_MERCATOR_LIMIT = 20037508.342789244;
-
 type GeoJSONPosition = number[];
 
 function geoJSONFeatures(input: any): any[] {
@@ -1610,56 +1656,7 @@ function normalizePolygonGeoJSON(input: any, splitMultiPolygon = false): any {
         throw new Error("O GeoJSON não contém coordenadas de polígono.");
     }
 
-    const crsName = String(
-        input?.crs?.properties?.name ?? input?.crs?.properties?.href ?? input?.crs?.name ?? "",
-    ).toLowerCase();
-    const declaresWebMercator = /3857|900913|102100|102113|3785/.test(crsName);
-    const declaresGeographic = /4326|crs:?84|crs84/.test(crsName);
-    const hasOutOfRangeCoordinates = positions.some(
-        ([x, y]) => Math.abs(x) > 180 || Math.abs(y) > 90,
-    );
-    const hasLargeCoordinates = positions.some(
-        ([x, y]) => Math.max(Math.abs(x), Math.abs(y)) > 1000,
-    );
-    const looksLikeWebMercator = positions.every(
-        ([x, y]) => Math.abs(x) <= WEB_MERCATOR_LIMIT && Math.abs(y) <= WEB_MERCATOR_LIMIT,
-    );
-
-    let convertFromWebMercator = declaresWebMercator;
-    if (!declaresWebMercator && hasOutOfRangeCoordinates) {
-        if (declaresGeographic) {
-            throw new Error("O arquivo declara EPSG:4326/CRS84, mas contém coordenadas fora de longitude/latitude.");
-        }
-        if (crsName && !declaresGeographic) {
-            throw new Error(`SRC não suportado para reprojeção automática: ${crsName}. Exporte em EPSG:4326 ou EPSG:3857.`);
-        }
-        if (hasLargeCoordinates && looksLikeWebMercator) {
-            // Heurística para GeoJSON sem metadados CRS que ainda contém metros de EPSG:3857.
-            convertFromWebMercator = true;
-        } else {
-            throw new Error("Coordenadas fora de longitude/latitude e sem SRC reconhecido; informe EPSG:3857 ou exporte em EPSG:4326.");
-        }
-    }
-
-    const transformPosition = (position: GeoJSONPosition): GeoJSONPosition => {
-        const [x, y, ...extra] = position;
-        if (!Number.isFinite(x) || !Number.isFinite(y)) {
-            throw new Error("O GeoJSON contém coordenadas não numéricas.");
-        }
-        if (convertFromWebMercator) {
-            if (Math.abs(x) > WEB_MERCATOR_LIMIT || Math.abs(y) > WEB_MERCATOR_LIMIT) {
-                throw new Error("Coordenadas fora do limite válido de EPSG:3857.");
-            }
-            const longitude = (x / WEB_MERCATOR_LIMIT) * 180;
-            const earthRadius = WEB_MERCATOR_LIMIT / Math.PI;
-            const latitude = (Math.atan(Math.sinh(y / earthRadius)) * 180) / Math.PI;
-            return [longitude, latitude, ...extra];
-        }
-        if (Math.abs(x) > 180 || Math.abs(y) > 90) {
-            throw new Error("Coordenadas geográficas fora dos limites de longitude/latitude.");
-        }
-        return [...position];
-    };
+    const transformPosition = createCoordinateTransformer(input, positions);
 
     const normalizeRing = (ring: any): number[][] | null => {
         if (!Array.isArray(ring)) return null;
@@ -1828,7 +1825,7 @@ const calculateBBox = (geojson: any) => {
 export const plugin = {
 	id: "smart15-orquestrador",
 	name: "Smart-15: Acessibilidade",
-	version: "2.0.0",
+	version: "2.1.0",
 	urlParameterNames: [],
 	activate(app: any) {
 		if (app.registerRightPanel) {
@@ -2370,6 +2367,21 @@ export const plugin = {
                     const sampleFileInput = wrap.querySelector("#sampleFileInput") as HTMLInputElement;
                     const sampleStatus = wrap.querySelector("#sampleStatus") as HTMLDivElement;
                     const sampleCoords = wrap.querySelector("#sampleCoords") as HTMLDivElement;
+                    const startPointMode = wrap.querySelector("#startPointMode") as HTMLSelectElement;
+                    const startPointStatus = wrap.querySelector("#startPointStatus") as HTMLDivElement;
+                    const startPointCoordinateFields = wrap.querySelector("#startPointCoordinateFields") as HTMLDivElement;
+                    const startPointAddressFields = wrap.querySelector("#startPointAddressFields") as HTMLDivElement;
+                    const startPointFileFields = wrap.querySelector("#startPointFileFields") as HTMLDivElement;
+                    const startLatitudeInput = wrap.querySelector("#startLatitude") as HTMLInputElement;
+                    const startLongitudeInput = wrap.querySelector("#startLongitude") as HTMLInputElement;
+                    const startAddressQuery = wrap.querySelector("#startAddressQuery") as HTMLInputElement;
+                    const btnSearchAddress = wrap.querySelector("#btnSearchAddress") as HTMLButtonElement;
+                    const startAddressResults = wrap.querySelector("#startAddressResults") as HTMLSelectElement;
+                    const startPointFileInput = wrap.querySelector("#startPointFileInput") as HTMLInputElement;
+                    const btnUploadStartPoints = wrap.querySelector("#btnUploadStartPoints") as HTMLButtonElement;
+                    const startPointFileResults = wrap.querySelector("#startPointFileResults") as HTMLSelectElement;
+                    let uploadedStartPoints: SimulationStartPoint[] = [];
+                    let addressStartPoints: SimulationStartPoint[] = [];
                     const basemapSelect = wrap.querySelector("#basemapSelect") as HTMLSelectElement;
                     const drawSampleClass = wrap.querySelector("#drawSampleClass") as HTMLSelectElement;
                     const btnDrawSample = wrap.querySelector("#btnDrawSample") as HTMLButtonElement;
@@ -2387,6 +2399,241 @@ export const plugin = {
                     const corOsm = wrap.querySelector("#corOsm") as HTMLInputElement; 
                     const opacOsm = wrap.querySelector("#opacOsm") as HTMLInputElement; 
                     const contornoOsm = wrap.querySelector("#contornoOsm") as HTMLInputElement;
+
+                    const setStartPointStatus = (message: string, color = "#4a5568") => {
+                        startPointStatus.textContent = message;
+                        startPointStatus.style.color = color;
+                    };
+                    const pointInsideBoundary = (point: SimulationStartPoint) =>
+                        Boolean(geometriaGeoJSON)
+                        && polygonGeoJSONCoversPoint(
+                            geometriaGeoJSON,
+                            point.longitude,
+                            point.latitude,
+                        );
+                    const updateStartPointMode = () => {
+                        startPointCoordinateFields.style.display = startPointMode.value === "coordinates" ? "block" : "none";
+                        startPointAddressFields.style.display = startPointMode.value === "address" ? "block" : "none";
+                        startPointFileFields.style.display = startPointMode.value === "file" ? "block" : "none";
+                        if (startPointMode.value === "centroid") {
+                            setStartPointStatus(t("origin.centroidPending"));
+                        } else if (startPointMode.value === "address") {
+                            setStartPointStatus(t("origin.chooseAddress"));
+                        } else if (startPointMode.value === "file") {
+                            setStartPointStatus(uploadedStartPoints.length ? t("origin.chooseFilePoint") : "");
+                        } else {
+                            setStartPointStatus("");
+                        }
+                    };
+                    const validateStartPoint = (point: SimulationStartPoint): SimulationStartPoint => {
+                        if (!geometriaGeoJSON) {
+                            throw new Error(t("simulation.areaRequired"));
+                        }
+                        if (
+                            !Number.isFinite(point.longitude)
+                            || !Number.isFinite(point.latitude)
+                            || point.longitude < -180
+                            || point.longitude > 180
+                            || point.latitude < -90
+                            || point.latitude > 90
+                        ) {
+                            throw new Error("Longitude/latitude fora dos limites válidos.");
+                        }
+                        if (!pointInsideBoundary(point)) {
+                            throw new Error(t("origin.pointOutside"));
+                        }
+                        return point;
+                    };
+                    const getSelectedStartPoint = (): SimulationStartPoint | null => {
+                        if (startPointMode.value === "centroid") return null;
+                        if (startPointMode.value === "coordinates") {
+                            const latitude = parseDecimalDegrees(startLatitudeInput.value);
+                            const longitude = parseDecimalDegrees(startLongitudeInput.value);
+                            return validateStartPoint({
+                                id: "manual-coordinates",
+                                label: `${latitude}, ${longitude}`,
+                                longitude,
+                                latitude,
+                            });
+                        }
+                        if (startPointMode.value === "address") {
+                            if (!startAddressResults.value) throw new Error(t("origin.chooseAddress"));
+                            const selected = Number(startAddressResults.value);
+                            const point = addressStartPoints[selected];
+                            if (!point) throw new Error(t("origin.chooseAddress"));
+                            return validateStartPoint(point);
+                        }
+                        if (startPointMode.value === "file") {
+                            if (!startPointFileResults.value) throw new Error(t("origin.chooseFilePoint"));
+                            const selected = Number(startPointFileResults.value);
+                            const point = uploadedStartPoints[selected];
+                            if (!point) throw new Error(t("origin.chooseFilePoint"));
+                            return validateStartPoint(point);
+                        }
+                        throw new Error("Selecione um método válido para o ponto inicial.");
+                    };
+
+                    startPointMode.addEventListener("change", updateStartPointMode);
+                    const validateCoordinateFields = () => {
+                        if (!startLatitudeInput.value.trim() || !startLongitudeInput.value.trim()) {
+                            setStartPointStatus("");
+                            return;
+                        }
+                        try {
+                            const point = getSelectedStartPoint();
+                            if (point) setStartPointStatus(`${t("origin.pointReady")} ${point.latitude}, ${point.longitude}`, "#2f855a");
+                        } catch (error) {
+                            setStartPointStatus(error instanceof Error ? error.message : String(error), "#c53030");
+                        }
+                    };
+                    startLatitudeInput.addEventListener("change", validateCoordinateFields);
+                    startLongitudeInput.addEventListener("change", validateCoordinateFields);
+
+                    startAddressResults.addEventListener("change", () => {
+                        const point = addressStartPoints[Number(startAddressResults.value)];
+                        if (!point) return;
+                        try {
+                            validateStartPoint(point);
+                            setStartPointStatus(`${t("origin.pointReady")} ${point.label}`, "#2f855a");
+                        } catch (error) {
+                            setStartPointStatus(error instanceof Error ? error.message : String(error), "#c53030");
+                        }
+                    });
+
+                    btnSearchAddress.addEventListener("click", async () => {
+                        const query = startAddressQuery.value.trim();
+                        if (!geometriaGeoJSON || !bboxCapturada) {
+                            setStartPointStatus(t("simulation.areaRequired"), "#c53030");
+                            return;
+                        }
+                        if (query.length < 3) {
+                            setStartPointStatus(t("origin.searchMin"), "#c53030");
+                            return;
+                        }
+                        btnSearchAddress.disabled = true;
+                        startAddressResults.style.display = "none";
+                        setStartPointStatus(t("origin.searching"));
+                        try {
+                            const params = new URLSearchParams({
+                                query,
+                                bbox: bboxCapturada.join(","),
+                            });
+                            const response = await fetch(`/api/geocode?${params.toString()}`);
+                            const payload = await response.json();
+                            if (!response.ok) {
+                                throw new Error(payload.detail || "Falha ao consultar o serviço de endereços.");
+                            }
+                            addressStartPoints = (payload.results ?? []).map((result: any, index: number) => ({
+                                id: String(result.id ?? `nominatim-${index}`),
+                                label: String(result.label ?? `${result.latitude}, ${result.longitude}`),
+                                longitude: Number(result.longitude),
+                                latitude: Number(result.latitude),
+                            }));
+                            startAddressResults.replaceChildren();
+                            const placeholder = document.createElement("option");
+                            placeholder.value = "";
+                            placeholder.textContent = addressStartPoints.length
+                                ? t("origin.addressResultPlaceholder")
+                                : t("origin.addressNoResults");
+                            startAddressResults.appendChild(placeholder);
+                            addressStartPoints.forEach((point, index) => {
+                                const option = document.createElement("option");
+                                option.value = String(index);
+                                option.textContent = point.label;
+                                startAddressResults.appendChild(option);
+                            });
+                            startAddressResults.value = "";
+                            startAddressResults.style.display = "block";
+                            setStartPointStatus(addressStartPoints.length
+                                ? t("origin.chooseAddress")
+                                : t("origin.addressNotFound"),
+                            addressStartPoints.length ? "#4a5568" : "#c53030");
+                        } catch (error) {
+                            setStartPointStatus(error instanceof Error ? error.message : String(error), "#c53030");
+                        } finally {
+                            btnSearchAddress.disabled = false;
+                        }
+                    });
+
+                    btnUploadStartPoints.addEventListener("click", () => startPointFileInput.click());
+                    startPointFileInput.addEventListener("change", (event: any) => {
+                        const file = event.target.files?.[0] as File | undefined;
+                        if (!file) return;
+                        if (file.size > 10 * 1024 * 1024) {
+                            setStartPointStatus(t("origin.fileTooLarge"), "#c53030");
+                            startPointFileInput.value = "";
+                            return;
+                        }
+                        const reader = new FileReader();
+                        reader.onload = (loadEvent: any) => {
+                            try {
+                                const parsed = JSON.parse(String(loadEvent.target?.result ?? "").replace(/^\uFEFF/, ""));
+                                const normalized = normalizePointGeoJSON(parsed);
+                                if (normalized.features.length > MAX_START_POINTS) {
+                                    throw new Error(t("origin.fileTooMany", { limit: MAX_START_POINTS }));
+                                }
+                                const points: SimulationStartPoint[] = normalized.features.map((feature, index) => {
+                                    const properties = feature.properties ?? {};
+                                    const label = String(
+                                        properties.nome
+                                        ?? properties.name
+                                        ?? properties.label
+                                        ?? properties.titulo
+                                        ?? properties.title
+                                        ?? feature.id
+                                        ?? `Ponto ${index + 1}`,
+                                    );
+                                    return {
+                                        id: String(feature.id ?? index + 1),
+                                        label,
+                                        longitude: feature.geometry.coordinates[0],
+                                        latitude: feature.geometry.coordinates[1],
+                                    };
+                                });
+                                if (!geometriaGeoJSON) throw new Error(t("simulation.areaRequired"));
+                                const outsidePoints = points.filter((point) => !pointInsideBoundary(point));
+                                if (outsidePoints.length) {
+                                    throw new Error(t("origin.fileOutside", { count: outsidePoints.length }));
+                                }
+                                if (points.length === 0) throw new Error(t("origin.noPointResults"));
+                                uploadedStartPoints = points;
+                                startPointFileResults.replaceChildren();
+                                const placeholder = document.createElement("option");
+                                placeholder.value = "";
+                                placeholder.textContent = t("origin.fileSelectPlaceholder");
+                                startPointFileResults.appendChild(placeholder);
+                                points.forEach((point, index) => {
+                                    const option = document.createElement("option");
+                                    option.value = String(index);
+                                    option.textContent = `${index + 1}. ${point.label}`;
+                                    startPointFileResults.appendChild(option);
+                                });
+                                startPointFileResults.value = "";
+                                startPointFileResults.style.display = "block";
+                                setStartPointStatus(`${t("origin.fileLoaded", { count: points.length })} ${t("origin.chooseFilePoint")}`, "#2f855a");
+                            } catch (error) {
+                                uploadedStartPoints = [];
+                                startPointFileResults.replaceChildren();
+                                startPointFileResults.style.display = "none";
+                                setStartPointStatus(error instanceof Error ? error.message : String(error), "#c53030");
+                            } finally {
+                                startPointFileInput.value = "";
+                            }
+                        };
+                        reader.onerror = () => setStartPointStatus(t("origin.fileReadError"), "#c53030");
+                        reader.readAsText(file);
+                    });
+                    startPointFileResults.addEventListener("change", () => {
+                        const point = uploadedStartPoints[Number(startPointFileResults.value)];
+                        if (!point) return;
+                        try {
+                            validateStartPoint(point);
+                            setStartPointStatus(`${t("origin.pointReady")} ${point.label}`, "#2f855a");
+                        } catch (error) {
+                            setStartPointStatus(error instanceof Error ? error.message : String(error), "#c53030");
+                        }
+                    });
+                    updateStartPointMode();
                     
                     const opacIso = wrap.querySelector("#opacIso") as HTMLInputElement; 
                     const contornoIso = wrap.querySelector("#contornoIso") as HTMLInputElement;
@@ -2903,6 +3150,18 @@ export const plugin = {
                         sampleStatus.style.color = "#4a5568";
                         sampleCoords.innerText = "";
                         sampleFileInput.value = "";
+                        uploadedStartPoints = [];
+                        addressStartPoints = [];
+                        startPointFileResults.replaceChildren();
+                        startPointFileResults.style.display = "none";
+                        startAddressResults.replaceChildren();
+                        startAddressResults.style.display = "none";
+                        startPointFileInput.value = "";
+                        startLatitudeInput.value = "";
+                        startLongitudeInput.value = "";
+                        startAddressQuery.value = "";
+                        startPointMode.value = "centroid";
+                        updateStartPointMode();
                         (wrap.querySelector("#rasterLegendsContainer") as HTMLDivElement).style.display = "none";
                         
                         clearInterval((window as any).simProgressInterval); (wrap.querySelector("#progressContainer") as HTMLDivElement).style.display = "none";
@@ -2913,29 +3172,58 @@ export const plugin = {
                     hiddenInput.addEventListener("change", (e: any) => {
                         const file = e.target.files[0]; if (file) {
                             areaStatus.innerHTML = SVG_ICONS.LOAD + " Lendo...";
+                            geometriaGeoJSON = null;
+                            bboxCapturada = null;
+                            areaCoords.innerText = "";
+                            uploadedStartPoints = [];
+                            addressStartPoints = [];
+                            startPointFileResults.replaceChildren();
+                            startPointFileResults.style.display = "none";
+                            startAddressResults.replaceChildren();
+                            startAddressResults.style.display = "none";
+                            startPointMode.value = "centroid";
+                            updateStartPointMode();
+                            const previousMap = getMapInstance(app);
+                            if (previousMap) {
+                                if (previousMap.getLayer("smart15-input-area-fill")) previousMap.removeLayer("smart15-input-area-fill");
+                                if (previousMap.getLayer("smart15-input-area-line")) previousMap.removeLayer("smart15-input-area-line");
+                                if (previousMap.getSource("smart15-input-area")) previousMap.removeSource("smart15-input-area");
+                            }
+                            layersAtivos = layersAtivos.filter((id) => id !== "smart15-input-area-fill" && id !== "smart15-input-area-line");
                             const reader = new FileReader();
                             reader.onload = (ev: any) => {
                                 try {
                                     const parsedGeoJSON = JSON.parse(String(ev.target?.result ?? "").replace(/^\uFEFF/, ""));
                                     geometriaGeoJSON = normalizePolygonGeoJSON(parsedGeoJSON);
                                     const b = calculateBBox(geometriaGeoJSON);
-                                    if(b) {
-                                        bboxCapturada = [b[0][0], b[0][1], b[1][0], b[1][1]]; areaStatus.innerHTML = SVG_ICONS.SUCCESS + " Capturado!";
-                                        areaCoords.innerText = "BBox: [" + bboxCapturada[0].toFixed(4) + ", " + bboxCapturada[1].toFixed(4) + ", " + bboxCapturada[2].toFixed(4) + ", " + bboxCapturada[3].toFixed(4) + "]";
-                                        const sourceId = 'smart15-input-area';
-                                        const mapObj = getMapInstance(app);
-                                        if(mapObj) {
-                                            if (!mapObj.getSource(sourceId)) { mapObj.addSource(sourceId, { type: 'geojson', data: geometriaGeoJSON }); } else { mapObj.getSource(sourceId).setData(geometriaGeoJSON); }
-                                            if (!mapObj.getLayer(sourceId+'-fill')) { mapObj.addLayer({ id: sourceId+'-fill', type: 'fill', source: sourceId, paint: { 'fill-color': corArea.value, 'fill-opacity': 0.1 } }); layersAtivos.push(sourceId+'-fill'); }
-                                            if (!mapObj.getLayer(sourceId+'-line')) { mapObj.addLayer({ id: sourceId+'-line', type: 'line', source: sourceId, paint: { 'line-color': corArea.value, 'line-width': 2, 'line-opacity': 0 } }); layersAtivos.push(sourceId+'-line'); }
-                                            mapObj.fitBounds(b, { padding: 40 }); painelPosProcessamento.style.display = "block"; appendLayerToggle(sourceId+'-fill', t("layer.studyArea"), listaCamadasInput); updateLayerStyle();
-                                        }
-                                    } else { areaStatus.innerHTML = SVG_ICONS.WARN + " Falha BBox."; }
+                                    if (!b) throw new Error("Nenhuma geometria poligonal válida foi encontrada.");
+                                    bboxCapturada = [b[0][0], b[0][1], b[1][0], b[1][1]];
+                                    areaStatus.innerHTML = SVG_ICONS.SUCCESS + " Capturado!";
+                                    areaCoords.innerText = "BBox: [" + bboxCapturada[0].toFixed(4) + ", " + bboxCapturada[1].toFixed(4) + ", " + bboxCapturada[2].toFixed(4) + ", " + bboxCapturada[3].toFixed(4) + "]";
+                                    const sourceId = 'smart15-input-area';
+                                    const mapObj = getMapInstance(app);
+                                    if(mapObj) {
+                                        if (!mapObj.getSource(sourceId)) { mapObj.addSource(sourceId, { type: 'geojson', data: geometriaGeoJSON }); } else { mapObj.getSource(sourceId).setData(geometriaGeoJSON); }
+                                        if (!mapObj.getLayer(sourceId+'-fill')) { mapObj.addLayer({ id: sourceId+'-fill', type: 'fill', source: sourceId, paint: { 'fill-color': corArea.value, 'fill-opacity': 0.1 } }); layersAtivos.push(sourceId+'-fill'); }
+                                        if (!mapObj.getLayer(sourceId+'-line')) { mapObj.addLayer({ id: sourceId+'-line', type: 'line', source: sourceId, paint: { 'line-color': corArea.value, 'line-width': 2, 'line-opacity': 0 } }); layersAtivos.push(sourceId+'-line'); }
+                                        mapObj.fitBounds(b, { padding: 40 }); painelPosProcessamento.style.display = "block"; appendLayerToggle(sourceId+'-fill', t("layer.studyArea"), listaCamadasInput); updateLayerStyle();
+                                    }
                                 } catch(err) {
                                     console.error("[Smart15] Erro ao carregar limite geográfico:", err);
-                                    areaStatus.innerHTML = SVG_ICONS.WARN + " Erro GeoJSON (ver console)";
+                                    areaStatus.innerHTML = SVG_ICONS.WARN;
+                                    areaStatus.appendChild(document.createTextNode(" " + t("area.uploadError") + " " + (err instanceof Error ? err.message : String(err))));
+                                    geometriaGeoJSON = null;
+                                    bboxCapturada = null;
                                 }
+                                hiddenInput.value = "";
                             }; reader.readAsText(file);
+                            reader.onerror = () => {
+                                geometriaGeoJSON = null;
+                                bboxCapturada = null;
+                                areaStatus.innerHTML = SVG_ICONS.WARN;
+                                areaStatus.appendChild(document.createTextNode(" " + t("area.uploadError") + " falha ao ler o arquivo."));
+                                hiddenInput.value = "";
+                            };
                         }
                     });
 
@@ -3187,6 +3475,16 @@ export const plugin = {
                           return;
                         }
 
+                        let selectedStartPoint: SimulationStartPoint | null = null;
+                        try {
+                          selectedStartPoint = getSelectedStartPoint();
+                        } catch (error) {
+                          const message = error instanceof Error ? error.message : String(error);
+                          setStartPointStatus(message, "#c53030");
+                          alert(message);
+                          return;
+                        }
+
                         const btnSimular =
                           wrap.querySelector(
                             "#btnSimular",
@@ -3285,12 +3583,15 @@ export const plugin = {
                             const pData = {
                                 perfis: Array.from(wrap.querySelectorAll(".perfil-target:checked")).map((cb:any)=>cb.value), alvos: Array.from(wrap.querySelectorAll(".osm-target:checked")).map((cb:any)=>cb.value),
                                 formatos: Array.from(wrap.querySelectorAll(".formato-saida:checked")).map((cb:any)=>cb.value), bbox: bboxCapturada, geometria: geometriaGeoJSON,
+                                start_point_mode: startPointMode.value,
+                                start_point: selectedStartPoint ? [selectedStartPoint.longitude, selectedStartPoint.latitude] : null,
+                                start_point_label: selectedStartPoint?.label ?? "Centroide do polígono",
                                 formatos_export: Array.from(wrap.querySelectorAll(".formato-export:checked")).map((cb:any)=>cb.value),
                                 visualizacao: { extrusao_3d: (wrap.querySelector("#extrusao3d") as HTMLInputElement).checked },
                                 modo_temp: (wrap.querySelector("#modoTemp") as HTMLSelectElement).value,
                                 modo_veg: (wrap.querySelector("#modoVeg") as HTMLSelectElement).value,
                                 modo_dem: (wrap.querySelector("#modoDem") as HTMLSelectElement).value,
-                                pluginVersion: "2.0.0",
+                                pluginVersion: "2.1.0",
                                 tempo_alvo: 15,
 
                                 dataSources: [
@@ -3327,13 +3628,12 @@ export const plugin = {
                               },
                             );
 
+                            const res = await response.json().catch(() => ({}));
                             if (!response.ok) {
                               throw new Error(
-                                `Falha HTTP ${response.status}`
+                                res.detail || `Falha HTTP ${response.status}`
                               );
                             }
-
-                            const res = await response.json();
 
                             if (res.status !== "sucesso" || !res.data) {
                               throw new Error(

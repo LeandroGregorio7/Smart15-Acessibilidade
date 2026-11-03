@@ -67,6 +67,22 @@ Default addresses:
 
 For port configuration, logs, shutdown procedures, and troubleshooting, see the [installation guide](docs/instalacao.md).
 
+## Study boundary and simulation start point
+
+A valid Polygon or MultiPolygon is required for every simulation, regardless of the selected start-point method. The backend validates the origin against the actual geometry (including holes), clips isochrones and hexagons to the boundary, and rejects oversized geometries before raster downloads or routing. The default processing limits are 100 km² and 1.0° of bounding-box span in either direction; configure them with `SMART15_MAX_STUDY_AREA_KM2` and `SMART15_MAX_STUDY_BBOX_SPAN_DEGREES` in `.env`.
+
+The boundary and uploaded point files accept GeoJSON in EPSG:4326, EPSG:3857, or EPSG:31983 (SIRGAS 2000 / UTM zone 23S). The start point can be the polygon centroid, decimal latitude/longitude, an address found through a user-triggered OpenStreetMap/Nominatim search, or a point selected from an uploaded GeoJSON Point/MultiPoint file. Coordinate fields are separate and require a decimal **period** (`.`), for example `-23.55052`; decimal commas are not accepted. Point uploads are limited to 10 MB and 500 points, and one point is used per simulation run.
+
+Address search uses the configurable `SMART15_NOMINATIM_URL`, caches results, does not autocomplete, and identifies the application to Nominatim. The interface displays OpenStreetMap attribution. The public service has a strict maximum of one request per second; see the [Nominatim usage policy](https://operations.osmfoundation.org/policies/nominatim/).
+
+After pulling a version that contains these changes, rebuild and recreate the Docker services from the repository root:
+
+```bash
+git pull --ff-only origin main
+git submodule update --init --recursive
+docker compose --env-file .env --file deploy/compose/docker-compose.yml up -d --build --force-recreate
+```
+
 ## Step-by-Step How install and Run (PDF Document)
 [Smart15-Guia-de-Instalacao-Windows-PT-EN.pdf](https://github.com/user-attachments/files/31270334/Smart15-Guia-de-Instalacao-Windows-PT-EN.pdf)
 
